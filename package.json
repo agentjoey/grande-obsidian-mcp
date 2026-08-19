@@ -10,7 +10,9 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "start": "node --disable-warning=ExperimentalWarning src/main.ts"
+    "start": "node --disable-warning=ExperimentalWarning src/main.ts",
+    "launchd:install": "node --disable-warning=ExperimentalWarning ops/launchd/install.ts",
+    "launchd:uninstall": "node --disable-warning=ExperimentalWarning ops/launchd/uninstall.ts"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.12",

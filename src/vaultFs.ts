@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { lstat, readdir, readFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
-import { PathPolicyError, resolveExistingMarkdown, resolveProjectDirectory } from "./pathPolicy.js";
+import { PathPolicyError, resolveExistingMarkdown, resolveProjectDirectory } from "./pathPolicy.ts";
 
 export interface ProjectSummary {
   id: string | null;

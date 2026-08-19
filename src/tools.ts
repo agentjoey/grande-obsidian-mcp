@@ -1,4 +1,4 @@
-import type { ProjectService } from "./projectService.js";
+import type { ProjectService } from "./projectService.ts";
 
 export interface ReadToolDef {
   name: "list_projects" | "get_project_structure" | "read_project_document" | "search_project";

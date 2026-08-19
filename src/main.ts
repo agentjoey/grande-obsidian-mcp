@@ -1,5 +1,5 @@
 import { serve } from "@hono/node-server";
-import { createRuntime, loadRuntimeSettings } from "./runtime.js";
+import { createRuntime, loadRuntimeSettings } from "./runtime.ts";
 
 const settings = loadRuntimeSettings(process.env);
 const runtime = await createRuntime(settings);

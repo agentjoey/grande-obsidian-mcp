@@ -1,7 +1,7 @@
 import type { Hono } from "hono";
-import { loadConfig, type AppConfig } from "./config.js";
-import { createProjectService } from "./projectService.js";
-import { createApp } from "./server.js";
+import { loadConfig, type AppConfig } from "./config.ts";
+import { createProjectService } from "./projectService.ts";
+import { createApp } from "./server.ts";
 
 export interface RuntimeSettings {
   configPath: string;

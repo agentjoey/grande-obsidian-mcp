@@ -1,4 +1,4 @@
-import { PathPolicyError } from "./pathPolicy.js";
+import { PathPolicyError } from "./pathPolicy.ts";
 import {
   listMarkdownEntries,
   listProjects,
@@ -6,7 +6,7 @@ import {
   type MarkdownRead,
   type ProjectSummary,
   type StructureResult,
-} from "./vaultFs.js";
+} from "./vaultFs.ts";
 
 export interface ProjectServiceOptions {
   projectRootPath: string;

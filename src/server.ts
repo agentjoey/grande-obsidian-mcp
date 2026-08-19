@@ -2,9 +2,9 @@ import { Hono } from "hono";
 import { z, type ZodRawShape, type ZodTypeAny } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import { authorizeRequest, AuthError } from "./auth.js";
-import type { ProjectService } from "./projectService.js";
-import { buildReadTools, type ReadToolDef } from "./tools.js";
+import { authorizeRequest, AuthError } from "./auth.ts";
+import type { ProjectService } from "./projectService.ts";
+import { buildReadTools, type ReadToolDef } from "./tools.ts";
 
 export interface ServerOptions {
   service: ProjectService;
