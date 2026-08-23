@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { resolveExistingMarkdown, resolveProjectDirectory } from "../src/pathPolicy.js";
+import { resolveCreatableMarkdown, resolveExistingMarkdown, resolveProjectDirectory } from "../src/pathPolicy.js";
 
 const roots: string[] = [];
 
@@ -57,5 +57,30 @@ describe("project path policy", () => {
     await writeFile(join(outside, "secret.md"), "secret", "utf8");
     await symlink(outside, join(projectRoot, project, "linked"));
     await expect(resolveExistingMarkdown(projectRoot, project, "linked/secret.md")).rejects.toThrow(/symbolic link/i);
+  });
+
+  it("resolves an absent Markdown target only when every parent already exists", async () => {
+    const { projectRoot, project } = await fixture();
+    await expect(resolveCreatableMarkdown(projectRoot, project, "design/new.md"))
+      .resolves.toBe(join(projectRoot, project, "design", "new.md"));
+    await expect(resolveCreatableMarkdown(projectRoot, project, "missing/new.md"))
+      .rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("rejects an existing create target without changing it", async () => {
+    const { projectRoot, project } = await fixture();
+    await expect(resolveCreatableMarkdown(projectRoot, project, "design/architecture.md"))
+      .rejects.toMatchObject({ code: "ALREADY_EXISTS" });
+  });
+
+  it("rejects unsafe create paths and symlink targets", async () => {
+    const { root, projectRoot, project } = await fixture();
+    const outside = join(root, "outside-create.md");
+    await writeFile(outside, "outside\n", "utf8");
+    await symlink(outside, join(projectRoot, project, "design", "linked.md"));
+
+    for (const path of ["../new.md", ".hidden/new.md", "design/new.txt", "design/linked.md"]) {
+      await expect(resolveCreatableMarkdown(projectRoot, project, path)).rejects.toThrow();
+    }
   });
 });

@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import { lstat, readdir, readFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
-import { PathPolicyError, resolveExistingMarkdown, resolveProjectDirectory } from "./pathPolicy.ts";
+import { atomicCreateFile } from "./filePrimitives.ts";
+import { PathPolicyError, resolveCreatableMarkdown, resolveExistingMarkdown, resolveProjectDirectory } from "./pathPolicy.ts";
+import { toWriteDomainError, WriteDomainError } from "./writeErrors.ts";
 
 export interface ProjectSummary {
   id: string | null;
@@ -26,12 +28,33 @@ export interface MarkdownRead {
   truncated: boolean;
 }
 
+export interface MarkdownWrite {
+  path: string;
+  sha256: string;
+  totalBytes: number;
+}
+
 function lexicalName(a: { name: string }, b: { name: string }): number {
   return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
 }
 
 function logicalPath(root: string, absolute: string): string {
   return relative(root, absolute).split(sep).join("/");
+}
+
+function sha256(content: Uint8Array): string {
+  return createHash("sha256").update(content).digest("hex");
+}
+
+async function verifyWrittenFile(targetPath: string, expectedSha256: string): Promise<void> {
+  try {
+    const final = await readFile(targetPath);
+    if (sha256(final) !== expectedSha256) {
+      throw new WriteDomainError("VERIFY_FAILED", "written document did not match intended content");
+    }
+  } catch (error) {
+    throw toWriteDomainError(error, "VERIFY_FAILED");
+  }
 }
 
 export async function listProjects(projectRootPath: string): Promise<ProjectSummary[]> {
@@ -112,8 +135,37 @@ export async function readMarkdown(
   const full = await readFile(absolute);
   return {
     content: full.subarray(0, maxBytes).toString("utf8"),
-    sha256: createHash("sha256").update(full).digest("hex"),
+    sha256: sha256(full),
     totalBytes: full.byteLength,
     truncated: full.byteLength > maxBytes,
   };
+}
+
+export async function createMarkdown(
+  projectRootPath: string,
+  project: string,
+  path: string,
+  content: Uint8Array,
+): Promise<MarkdownWrite> {
+  let targetPath: string;
+  try {
+    targetPath = await resolveCreatableMarkdown(projectRootPath, project, path);
+  } catch (error) {
+    throw toWriteDomainError(error);
+  }
+
+  const intendedSha = sha256(content);
+
+  try {
+    const revalidatedTarget = await resolveCreatableMarkdown(projectRootPath, project, path);
+    if (revalidatedTarget !== targetPath) {
+      throw new WriteDomainError("POLICY_DENIED", "write target changed during validation");
+    }
+    await atomicCreateFile(targetPath, content);
+  } catch (error) {
+    throw toWriteDomainError(error);
+  }
+
+  await verifyWrittenFile(targetPath, intendedSha);
+  return { path, sha256: intendedSha, totalBytes: content.byteLength };
 }
