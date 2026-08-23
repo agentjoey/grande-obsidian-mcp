@@ -36,6 +36,9 @@ const SAFE_WRITE = {
   openWorldHint: false as const,
 };
 
+const PROJECT_ARG_DESCRIPTION =
+  "Visible direct-child project directory name from list_projects.directory (for example, P033-GrandeGPT), not list_projects.id.";
+
 function requiredString(args: Record<string, unknown>, key: string): string {
   const value = args[key];
   if (typeof value !== "string" || value.length === 0) throw new Error(`${key} must be a non-empty string`);
@@ -71,7 +74,7 @@ export function buildTools(service: ProjectService): ToolDef[] {
       description: "List a bounded Markdown-focused structure for one configured project.",
       inputSchema: {
         type: "object",
-        properties: { project: { type: "string" } },
+        properties: { project: { type: "string", description: PROJECT_ARG_DESCRIPTION } },
         required: ["project"],
       },
       annotations: READ_ONLY,
@@ -83,7 +86,7 @@ export function buildTools(service: ProjectService): ToolDef[] {
       inputSchema: {
         type: "object",
         properties: {
-          project: { type: "string" },
+          project: { type: "string", description: PROJECT_ARG_DESCRIPTION },
           path: { type: "string" },
         },
         required: ["project", "path"],
@@ -97,7 +100,7 @@ export function buildTools(service: ProjectService): ToolDef[] {
       inputSchema: {
         type: "object",
         properties: {
-          project: { type: "string" },
+          project: { type: "string", description: PROJECT_ARG_DESCRIPTION },
           query: { type: "string" },
           maxResults: { type: "number" },
         },
@@ -117,7 +120,7 @@ export function buildTools(service: ProjectService): ToolDef[] {
       inputSchema: {
         type: "object",
         properties: {
-          project: { type: "string" },
+          project: { type: "string", description: PROJECT_ARG_DESCRIPTION },
           path: { type: "string" },
           content: { type: "string" },
         },
@@ -137,7 +140,7 @@ export function buildTools(service: ProjectService): ToolDef[] {
       inputSchema: {
         type: "object",
         properties: {
-          project: { type: "string" },
+          project: { type: "string", description: PROJECT_ARG_DESCRIPTION },
           path: { type: "string" },
           content: { type: "string" },
           expectedSha256: { type: "string" },

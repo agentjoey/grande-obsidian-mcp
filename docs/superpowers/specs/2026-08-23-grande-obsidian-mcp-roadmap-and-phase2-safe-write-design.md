@@ -1,17 +1,17 @@
 # grande-obsidian-mcp Roadmap Refresh & Phase 2 Safe Write Core Design
 
 **Date:** 2026-08-23  
-**Status:** Approved by Human Owner  
-**Phase:** Phase 2 / Safe Write Core  
+**Status:** Approved design; Phase 2 implementation and release gate completed 2026-08-24  
+**Phase:** Phase 2 / Safe Write Core — completed  
 **Repository:** `grande-obsidian-mcp`
 
 ## 1. Purpose
 
-This document is the authoritative design baseline for Phase 2 of `grande-obsidian-mcp`.
+This document is the authoritative design baseline and closeout record for Phase 2 of `grande-obsidian-mcp`.
 
 The provider is an **Obsidian-oriented, project-scoped, filesystem-backed safe Markdown provider**. It is not an arbitrary disk filesystem MCP and must not evolve into one by accident. The filesystem is an implementation layer for a deliberately narrow public Markdown capability surface.
 
-Phase 1 / M1 established the read core. Phase 2 adds only the minimum safe write surface required to make writes a first-class product capability without broadening the provider into general filesystem mutation.
+Phase 1 / M1 established the read core. Phase 2 added only the minimum safe write surface required to make writes a first-class product capability without broadening the provider into general filesystem mutation.
 
 ## 2. Product and architecture boundary
 
@@ -39,6 +39,12 @@ All reads and writes remain scoped to a configured project root and one visible 
 
 Cross-project mutation is not allowed.
 
+### 2.3 Public `project` argument contract
+
+`list_projects` returns project entries with `id`, `name`, and `directory` fields. For every other public capability, the `project` argument means the exact visible direct-child project directory name returned as `list_projects.directory`, for example `P033-GrandeGPT`.
+
+`list_projects.id` such as `P033` is metadata and is **not** an alias for the `project` argument. Phase 2 does not add an ID-to-directory mapping layer, hidden lookup, or compatibility fallback. This clarification documents the path contract already enforced by the provider; it does not change filesystem semantics.
+
 ## 3. Roadmap refresh
 
 ### Phase 1 / M1: Read Core — completed
@@ -50,16 +56,16 @@ The approved public read capabilities are:
 3. `read_project_document`
 4. `search_project`
 
-These remain unchanged by Phase 2 and must continue to be read-only.
+These remain unchanged by Phase 2 and continue to be read-only.
 
-### Phase 2: Safe Write Core — current
+### Phase 2: Safe Write Core — completed
 
-Phase 2 adds exactly two write capabilities:
+Phase 2 added exactly two write capabilities:
 
 5. `create_project_document`
 6. `update_project_document`
 
-After Phase 2 the public capability surface must contain **exactly six** tools. No other write operation is implied by this roadmap.
+The completed Phase 2 public capability surface contains **exactly six** tools. No other write operation is implied by this roadmap.
 
 ### Post-Phase-2 work
 
@@ -69,7 +75,7 @@ The roadmap therefore stays deliberately narrow: first establish a reliable read
 
 ## 4. Phase 2 public capability contract
 
-At Phase 2 completion the tool manifest must be exactly:
+The completed Phase 2 tool manifest is exactly:
 
 | Tool | Risk | readOnlyHint | destructiveHint | openWorldHint |
 | --- | --- | --- | --- | --- |
@@ -153,7 +159,7 @@ The normal successful result is the final document path, verified SHA-256, and t
 
 Required fields:
 
-- `project`: visible direct-child project directory name.
+- `project`: exact visible direct-child project directory name from `list_projects.directory`; do not use `list_projects.id`.
 - `path`: project-relative Markdown path.
 - `content`: UTF-8 Markdown content, at most 256 KiB.
 
@@ -192,7 +198,7 @@ If the available platform primitive cannot satisfy exclusive create + atomic pub
 
 Required fields:
 
-- `project`: visible direct-child project directory name.
+- `project`: exact visible direct-child project directory name from `list_projects.directory`; do not use `list_projects.id`.
 - `path`: project-relative Markdown path.
 - `content`: new UTF-8 Markdown content, at most 256 KiB.
 - `expectedSha256`: mandatory expected SHA-256 for the current full document bytes.
@@ -390,6 +396,21 @@ Use a disposable Markdown path inside an already-existing project directory/pare
 7. Read again and prove the file still contains the latest successful version unchanged.
 
 Do not add a delete capability just to clean up the disposable acceptance document.
+
+### Phase 2 closeout evidence — 2026-08-24
+
+The release gate completed successfully against the merged canonical Phase 2 implementation at commit `43cdc7cd77ab77ec4731e1abb8fa631e7e6ab8bc`:
+
+- the canonical launchd provider was listening on `127.0.0.1:8788` and an unauthenticated `/mcp` probe returned HTTP `401`;
+- live capability discovery returned exactly the approved six tools;
+- the first four tools were classified read-only and both write tools reported `risk=write` with `readOnlyHint=false`, `destructiveHint=false`, `openWorldHint=false`;
+- real Safe Create produced `phase2-s5-acceptance-20260823.md` under `P033-GrandeGPT` with SHA-256 `2e5ad9ef15d467d7439262534fcbc1c4bfc1cf7ddf2e6dd6782c138e6dbc9379` and 81 bytes, and the subsequent read returned the same SHA/content;
+- guarded Update using that SHA succeeded with SHA-256 `36352f851fd368f81aace322dc6c1df4fb9b4b13a1e8345e083a8a2f7bba4e4f` and 111 bytes, and the subsequent read returned the expected updated content;
+- reusing the old create SHA returned `STALE_FILE`;
+- the final read still returned SHA-256 `36352f851fd368f81aace322dc6c1df4fb9b4b13a1e8345e083a8a2f7bba4e4f`, 111 bytes, and the latest successful content unchanged, proving stale-write preservation;
+- no delete capability was added for acceptance cleanup; the disposable Markdown acceptance artifact is intentionally retained.
+
+**Phase 2 / Safe Write Core release gate: PASSED.**
 
 ## 15. Stop conditions
 

@@ -41,6 +41,25 @@ describe("MCP tool manifest", () => {
     }
   });
 
+  it("documents project arguments as list_projects.directory rather than list_projects.id", () => {
+    const tools = buildTools(service);
+    const projectTools = tools.filter((tool) => "project" in tool.inputSchema.properties);
+    expect(projectTools.map((tool) => tool.name).sort()).toEqual([
+      "create_project_document",
+      "get_project_structure",
+      "read_project_document",
+      "search_project",
+      "update_project_document",
+    ]);
+
+    for (const tool of projectTools) {
+      const description = tool.inputSchema.properties.project?.description;
+      expect(description).toContain("direct-child project directory name");
+      expect(description).toContain("list_projects.directory");
+      expect(description).toContain("not list_projects.id");
+    }
+  });
+
   it("routes read tool arguments to the project service", async () => {
     const tools = buildTools(service);
     const read = tools.find((tool) => tool.name === "read_project_document");
