@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -63,5 +64,68 @@ describe("project service", () => {
     const read = await service.readProjectDocument(project, "PRD.md");
     expect(read.content.length).toBeLessThanOrEqual(12);
     expect(read.truncated).toBe(true);
+  });
+
+  it("creates Markdown through the configured root and returns verified metadata", async () => {
+    const { projectRootPath, project } = await fixture();
+    const service = createProjectService({ projectRootPath });
+    const content = "# New\nservice create\n";
+
+    await expect(service.createProjectDocument(project, "design/NEW.md", content)).resolves.toEqual({
+      path: "design/NEW.md",
+      sha256: createHash("sha256").update(content).digest("hex"),
+      totalBytes: Buffer.byteLength(content),
+    });
+    await expect(readFile(join(projectRootPath, project, "design", "NEW.md"), "utf8")).resolves.toBe(content);
+  });
+
+  it("enforces the 256 KiB write limit in UTF-8 bytes", async () => {
+    const { projectRootPath, project } = await fixture();
+    const service = createProjectService({ projectRootPath });
+    const exact = "a".repeat(256 * 1024);
+
+    await expect(service.createProjectDocument(project, "design/exact.md", exact)).resolves.toMatchObject({
+      totalBytes: 256 * 1024,
+    });
+    await expect(service.createProjectDocument(project, "design/too-large.md", `${exact}a`))
+      .rejects.toMatchObject({ code: "INVALID_INPUT" });
+    await expect(service.createProjectDocument(project, "design/multibyte.md", "😀".repeat(65_537)))
+      .rejects.toMatchObject({ code: "INVALID_INPUT" });
+  });
+
+  it("updates only with a canonical expected SHA and returns verified metadata", async () => {
+    const { projectRootPath, project } = await fixture();
+    const service = createProjectService({ projectRootPath });
+    const target = join(projectRootPath, project, "PRD.md");
+    const before = await readFile(target);
+    const expectedSha256 = createHash("sha256").update(before).digest("hex");
+    const content = "# PRD\nservice update\n";
+
+    await expect(service.updateProjectDocument(project, "PRD.md", content, expectedSha256)).resolves.toEqual({
+      path: "PRD.md",
+      sha256: createHash("sha256").update(content).digest("hex"),
+      totalBytes: Buffer.byteLength(content),
+    });
+    await expect(readFile(target, "utf8")).resolves.toBe(content);
+  });
+
+  it.each(["", "0".repeat(63), "0".repeat(65), "A".repeat(64), "z".repeat(64)])(
+    "rejects malformed expectedSha256 %j",
+    async (expectedSha256) => {
+      const { projectRootPath, project } = await fixture();
+      const service = createProjectService({ projectRootPath });
+      await expect(service.updateProjectDocument(project, "PRD.md", "new\n", expectedSha256))
+        .rejects.toMatchObject({ code: "INVALID_INPUT" });
+    },
+  );
+
+  it("enforces the same UTF-8 byte limit for updates", async () => {
+    const { projectRootPath, project } = await fixture();
+    const service = createProjectService({ projectRootPath });
+    const before = await readFile(join(projectRootPath, project, "PRD.md"));
+    const expectedSha256 = createHash("sha256").update(before).digest("hex");
+
+    await expect(service.updateProjectDocument(project, "PRD.md", "😀".repeat(65_537), expectedSha256))
+      .rejects.toMatchObject({ code: "INVALID_INPUT" });
   });
 });

@@ -1,9 +1,9 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
-import { listMarkdownEntries, listProjects, readMarkdown } from "../src/vaultFs.js";
+import { createMarkdown, listMarkdownEntries, listProjects, readMarkdown, updateMarkdown } from "../src/vaultFs.js";
 
 const roots: string[] = [];
 
@@ -77,5 +77,87 @@ describe("vault filesystem", () => {
     await symlink(outside, join(projectRoot, "P033-GrandeGPT", "linked"));
 
     await expect(listMarkdownEntries(projectRoot, "P033-GrandeGPT", 10)).rejects.toThrow(/symbolic link/i);
+  });
+
+  it("creates a new Markdown document and reports its verified SHA and byte count", async () => {
+    const { projectRoot } = await fixture();
+    const content = Buffer.from("# New\ncomplete content\n", "utf8");
+
+    await expect(createMarkdown(projectRoot, "P033-GrandeGPT", "design/NEW.md", content)).resolves.toEqual({
+      path: "design/NEW.md",
+      sha256: createHash("sha256").update(content).digest("hex"),
+      totalBytes: content.byteLength,
+    });
+
+    await expect(readFile(join(projectRoot, "P033-GrandeGPT", "design", "NEW.md"))).resolves.toEqual(content);
+    expect((await readdir(join(projectRoot, "P033-GrandeGPT", "design"))).filter((name) => name.includes(".grande-"))).toEqual([]);
+  });
+
+  it("never overwrites an existing create target", async () => {
+    const { projectRoot } = await fixture();
+    const target = join(projectRoot, "P033-GrandeGPT", "PRD.md");
+    const before = await readFile(target);
+
+    await expect(createMarkdown(projectRoot, "P033-GrandeGPT", "PRD.md", Buffer.from("replacement\n")))
+      .rejects.toMatchObject({ code: "FILE_EXISTS" });
+    await expect(readFile(target)).resolves.toEqual(before);
+  });
+
+  it("never creates a missing parent directory", async () => {
+    const { projectRoot } = await fixture();
+    const missingParent = join(projectRoot, "P033-GrandeGPT", "missing");
+
+    await expect(createMarkdown(projectRoot, "P033-GrandeGPT", "missing/NEW.md", Buffer.from("new\n")))
+      .rejects.toMatchObject({ code: "FILE_NOT_FOUND" });
+    await expect(lstat(missingParent)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("maps unsafe create symlinks to POLICY_DENIED", async () => {
+    const { root, projectRoot } = await fixture();
+    const outside = join(root, "outside-create");
+    await mkdir(outside);
+    await symlink(outside, join(projectRoot, "P033-GrandeGPT", "linked-create"));
+
+    await expect(createMarkdown(projectRoot, "P033-GrandeGPT", "linked-create/NEW.md", Buffer.from("new\n")))
+      .rejects.toMatchObject({ code: "POLICY_DENIED" });
+  });
+
+  it("updates a Markdown document only when the current full SHA matches exactly", async () => {
+    const { projectRoot } = await fixture();
+    const target = join(projectRoot, "P033-GrandeGPT", "PRD.md");
+    const before = await readFile(target);
+    const expectedSha256 = createHash("sha256").update(before).digest("hex");
+    const next = Buffer.from("# PRD\nupdated content\n", "utf8");
+
+    await expect(updateMarkdown(projectRoot, "P033-GrandeGPT", "PRD.md", next, expectedSha256)).resolves.toEqual({
+      path: "PRD.md",
+      sha256: createHash("sha256").update(next).digest("hex"),
+      totalBytes: next.byteLength,
+    });
+    await expect(readFile(target)).resolves.toEqual(next);
+  });
+
+  it("returns STALE_FILE and preserves current bytes when expected SHA is stale", async () => {
+    const { projectRoot } = await fixture();
+    const target = join(projectRoot, "P033-GrandeGPT", "PRD.md");
+    const before = await readFile(target);
+    const staleSha = createHash("sha256").update("older version\n").digest("hex");
+
+    await expect(updateMarkdown(projectRoot, "P033-GrandeGPT", "PRD.md", Buffer.from("replacement\n"), staleSha))
+      .rejects.toMatchObject({ code: "STALE_FILE" });
+    await expect(readFile(target)).resolves.toEqual(before);
+  });
+
+  it("maps missing and unsafe update targets to stable write-domain errors", async () => {
+    const { root, projectRoot } = await fixture();
+    const validSha = "0".repeat(64);
+    await expect(updateMarkdown(projectRoot, "P033-GrandeGPT", "missing.md", Buffer.from("new\n"), validSha))
+      .rejects.toMatchObject({ code: "FILE_NOT_FOUND" });
+
+    const outside = join(root, "outside-update.md");
+    await writeFile(outside, "outside\n", "utf8");
+    await symlink(outside, join(projectRoot, "P033-GrandeGPT", "linked-update.md"));
+    await expect(updateMarkdown(projectRoot, "P033-GrandeGPT", "linked-update.md", Buffer.from("new\n"), validSha))
+      .rejects.toMatchObject({ code: "POLICY_DENIED" });
   });
 });

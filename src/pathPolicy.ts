@@ -14,6 +14,10 @@ export class PathPolicyError extends Error {
   }
 }
 
+function isNodeError(error: unknown, code: string): boolean {
+  return error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === code;
+}
+
 function assertDisplaySafe(value: string, label: string): void {
   if (CONTROL_CHAR_RE.test(value) || SPOOFING_CHAR_RE.test(value)) {
     throw new PathPolicyError("INVALID_INPUT", `${label} contains unsafe control/spoofing characters`);
@@ -48,7 +52,15 @@ function documentSegments(path: string): string[] {
 }
 
 async function assertRealDirectory(path: string, label: string): Promise<void> {
-  const stat = await lstat(path);
+  let stat;
+  try {
+    stat = await lstat(path);
+  } catch (error) {
+    if (isNodeError(error, "ENOENT")) {
+      throw new PathPolicyError("NOT_FOUND", `${label} does not exist`);
+    }
+    throw error;
+  }
   if (stat.isSymbolicLink()) {
     throw new PathPolicyError("PATH_ESCAPE", `${label} must not be a symbolic link`);
   }
@@ -98,4 +110,38 @@ export async function resolveExistingMarkdown(
   }
 
   return current;
+}
+
+export async function resolveCreatableMarkdown(
+  projectRootPath: string,
+  project: string,
+  documentPath: string,
+): Promise<string> {
+  const projectPath = await resolveProjectDirectory(projectRootPath, project);
+  const segments = documentSegments(documentPath);
+  let current = projectPath;
+
+  for (let index = 0; index < segments.length; index += 1) {
+    current = join(current, segments[index]!);
+    assertContained(projectPath, current);
+    const isLast = index === segments.length - 1;
+
+    if (!isLast) {
+      await assertRealDirectory(current, "document parent component");
+      continue;
+    }
+
+    try {
+      const stat = await lstat(current);
+      if (stat.isSymbolicLink()) {
+        throw new PathPolicyError("PATH_ESCAPE", "create target must not be a symbolic link");
+      }
+      throw new PathPolicyError("ALREADY_EXISTS", "create target already exists");
+    } catch (error) {
+      if (isNodeError(error, "ENOENT")) return current;
+      throw error;
+    }
+  }
+
+  throw new PathPolicyError("INVALID_INPUT", "document path must not be empty");
 }
