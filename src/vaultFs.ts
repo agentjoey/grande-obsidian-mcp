@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { lstat, readdir, readFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
-import { atomicCreateFile } from "./filePrimitives.ts";
+import { atomicCreateFile, atomicWriteFile } from "./filePrimitives.ts";
 import { PathPolicyError, resolveCreatableMarkdown, resolveExistingMarkdown, resolveProjectDirectory } from "./pathPolicy.ts";
 import { toWriteDomainError, WriteDomainError } from "./writeErrors.ts";
 
@@ -162,6 +162,47 @@ export async function createMarkdown(
       throw new WriteDomainError("POLICY_DENIED", "write target changed during validation");
     }
     await atomicCreateFile(targetPath, content);
+  } catch (error) {
+    throw toWriteDomainError(error);
+  }
+
+  await verifyWrittenFile(targetPath, intendedSha);
+  return { path, sha256: intendedSha, totalBytes: content.byteLength };
+}
+
+export async function updateMarkdown(
+  projectRootPath: string,
+  project: string,
+  path: string,
+  content: Uint8Array,
+  expectedSha256: string,
+): Promise<MarkdownWrite> {
+  let targetPath: string;
+  let current: Buffer;
+  try {
+    targetPath = await resolveExistingMarkdown(projectRootPath, project, path);
+    current = await readFile(targetPath);
+  } catch (error) {
+    throw toWriteDomainError(error);
+  }
+
+  if (sha256(current) !== expectedSha256) {
+    throw new WriteDomainError("STALE_FILE", "document has changed since it was read");
+  }
+
+  const intendedSha = sha256(content);
+
+  try {
+    await atomicWriteFile(targetPath, content, async () => {
+      const revalidatedTarget = await resolveExistingMarkdown(projectRootPath, project, path);
+      if (revalidatedTarget !== targetPath) {
+        throw new WriteDomainError("POLICY_DENIED", "write target changed during validation");
+      }
+      const latest = await readFile(revalidatedTarget);
+      if (sha256(latest) !== expectedSha256) {
+        throw new WriteDomainError("STALE_FILE", "document changed before atomic replacement");
+      }
+    });
   } catch (error) {
     throw toWriteDomainError(error);
   }

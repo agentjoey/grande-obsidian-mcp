@@ -4,6 +4,7 @@ import {
   listMarkdownEntries,
   listProjects,
   readMarkdown,
+  updateMarkdown,
   type MarkdownRead,
   type MarkdownWrite,
   type ProjectSummary,
@@ -34,6 +35,7 @@ export interface ProjectService {
   readProjectDocument(project: string, path: string): Promise<MarkdownRead>;
   searchProject(project: string, query: string, maxResults: number): Promise<SearchResult>;
   createProjectDocument(project: string, path: string, content: string): Promise<MarkdownWrite>;
+  updateProjectDocument(project: string, path: string, content: string, expectedSha256: string): Promise<MarkdownWrite>;
 }
 
 const DEFAULT_MAX_READ_BYTES = 32 * 1024;
@@ -41,6 +43,7 @@ const DEFAULT_MAX_STRUCTURE_ENTRIES = 250;
 const SEARCH_SCAN_ENTRY_LIMIT = 1000;
 const SEARCH_FILE_MAX_BYTES = 256 * 1024;
 const MAX_WRITE_BYTES = 256 * 1024;
+const SHA256_RE = /^[0-9a-f]{64}$/;
 
 function writeContent(content: string): Buffer {
   const encoded = Buffer.from(content, "utf8");
@@ -48,6 +51,13 @@ function writeContent(content: string): Buffer {
     throw new WriteDomainError("INVALID_INPUT", "content exceeds the 256 KiB write limit");
   }
   return encoded;
+}
+
+function expectedSha(value: string): string {
+  if (!SHA256_RE.test(value)) {
+    throw new WriteDomainError("INVALID_INPUT", "expectedSha256 must be a lowercase 64-character SHA-256");
+  }
+  return value;
 }
 
 export function createProjectService(options: ProjectServiceOptions): ProjectService {
@@ -104,6 +114,16 @@ export function createProjectService(options: ProjectServiceOptions): ProjectSer
 
     async createProjectDocument(project, path, content) {
       return createMarkdown(options.projectRootPath, project, path, writeContent(content));
+    },
+
+    async updateProjectDocument(project, path, content, expectedSha256) {
+      return updateMarkdown(
+        options.projectRootPath,
+        project,
+        path,
+        writeContent(content),
+        expectedSha(expectedSha256),
+      );
     },
   };
 }

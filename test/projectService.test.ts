@@ -92,4 +92,40 @@ describe("project service", () => {
     await expect(service.createProjectDocument(project, "design/multibyte.md", "😀".repeat(65_537)))
       .rejects.toMatchObject({ code: "INVALID_INPUT" });
   });
+
+  it("updates only with a canonical expected SHA and returns verified metadata", async () => {
+    const { projectRootPath, project } = await fixture();
+    const service = createProjectService({ projectRootPath });
+    const target = join(projectRootPath, project, "PRD.md");
+    const before = await readFile(target);
+    const expectedSha256 = createHash("sha256").update(before).digest("hex");
+    const content = "# PRD\nservice update\n";
+
+    await expect(service.updateProjectDocument(project, "PRD.md", content, expectedSha256)).resolves.toEqual({
+      path: "PRD.md",
+      sha256: createHash("sha256").update(content).digest("hex"),
+      totalBytes: Buffer.byteLength(content),
+    });
+    await expect(readFile(target, "utf8")).resolves.toBe(content);
+  });
+
+  it.each(["", "0".repeat(63), "0".repeat(65), "A".repeat(64), "z".repeat(64)])(
+    "rejects malformed expectedSha256 %j",
+    async (expectedSha256) => {
+      const { projectRootPath, project } = await fixture();
+      const service = createProjectService({ projectRootPath });
+      await expect(service.updateProjectDocument(project, "PRD.md", "new\n", expectedSha256))
+        .rejects.toMatchObject({ code: "INVALID_INPUT" });
+    },
+  );
+
+  it("enforces the same UTF-8 byte limit for updates", async () => {
+    const { projectRootPath, project } = await fixture();
+    const service = createProjectService({ projectRootPath });
+    const before = await readFile(join(projectRootPath, project, "PRD.md"));
+    const expectedSha256 = createHash("sha256").update(before).digest("hex");
+
+    await expect(service.updateProjectDocument(project, "PRD.md", "😀".repeat(65_537), expectedSha256))
+      .rejects.toMatchObject({ code: "INVALID_INPUT" });
+  });
 });

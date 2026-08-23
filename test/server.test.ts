@@ -10,6 +10,7 @@ const service: ProjectService = {
   readProjectDocument: async () => ({ content: "# PRD\n", sha256: "0".repeat(64), totalBytes: 6, truncated: false }),
   searchProject: async () => ({ results: [], truncated: false }),
   createProjectDocument: async (_project, path, content) => ({ path, sha256: "1".repeat(64), totalBytes: Buffer.byteLength(content) }),
+  updateProjectDocument: async (_project, path, content) => ({ path, sha256: "2".repeat(64), totalBytes: Buffer.byteLength(content) }),
 };
 
 function rpcHeaders(extra: Record<string, string> = {}): Record<string, string> {

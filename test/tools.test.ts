@@ -8,6 +8,7 @@ const service: ProjectService = {
   readProjectDocument: async () => ({ content: "", sha256: "0".repeat(64), totalBytes: 0, truncated: false }),
   searchProject: async () => ({ results: [], truncated: false }),
   createProjectDocument: async (_project, path, content) => ({ path, sha256: "1".repeat(64), totalBytes: Buffer.byteLength(content) }),
+  updateProjectDocument: async (_project, path, content) => ({ path, sha256: "2".repeat(64), totalBytes: Buffer.byteLength(content) }),
 };
 
 describe("MCP tool manifest", () => {

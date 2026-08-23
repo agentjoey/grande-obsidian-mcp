@@ -25,7 +25,11 @@ export async function atomicCreateFile(targetPath: string, content: Uint8Array):
   }
 }
 
-export async function atomicWriteFile(targetPath: string, content: Uint8Array): Promise<void> {
+export async function atomicWriteFile(
+  targetPath: string,
+  content: Uint8Array,
+  beforeReplace?: () => Promise<void>,
+): Promise<void> {
   const directory = dirname(targetPath);
   const temporaryPath = join(directory, `.${basename(targetPath)}.grande-${randomUUID()}.tmp`);
   let temporaryExists = false;
@@ -40,6 +44,7 @@ export async function atomicWriteFile(targetPath: string, content: Uint8Array): 
       await handle.close();
     }
 
+    await beforeReplace?.();
     await rename(temporaryPath, targetPath);
     temporaryExists = false;
   } finally {
