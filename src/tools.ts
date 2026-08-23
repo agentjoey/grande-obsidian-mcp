@@ -5,7 +5,8 @@ export type ToolName =
   | "get_project_structure"
   | "read_project_document"
   | "search_project"
-  | "create_project_document";
+  | "create_project_document"
+  | "update_project_document";
 
 export interface ToolDef {
   name: ToolName;
@@ -128,6 +129,28 @@ export function buildTools(service: ProjectService): ToolDef[] {
           requiredString(args, "project"),
           requiredString(args, "path"),
           requiredText(args, "content"),
+        ),
+    },
+    {
+      name: "update_project_document",
+      description: "Safely replace an existing Markdown document only when its full SHA-256 matches the expected version.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project: { type: "string" },
+          path: { type: "string" },
+          content: { type: "string" },
+          expectedSha256: { type: "string" },
+        },
+        required: ["project", "path", "content", "expectedSha256"],
+      },
+      annotations: SAFE_WRITE,
+      handler: (args) =>
+        service.updateProjectDocument(
+          requiredString(args, "project"),
+          requiredString(args, "path"),
+          requiredText(args, "content"),
+          requiredString(args, "expectedSha256"),
         ),
     },
   ];

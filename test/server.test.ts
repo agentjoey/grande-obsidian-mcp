@@ -41,19 +41,25 @@ describe("MCP HTTP server", () => {
     expect((await app.request("/mcp", { method: "POST", headers: rpcHeaders({ host: "evil.example" }), body })).status).toBe(403);
   });
 
-  it("serves exactly the four read tools plus Safe Create through Streamable HTTP MCP", async () => {
+  it("serves all six approved Phase 2 tools through Streamable HTTP MCP", async () => {
     const app = createApp({ service, token, allowedOrigins: [] });
     const response = await rpc(app, "tools/list", {});
 
     expect(response.status).toBe(200);
     const text = await response.text();
-    for (const name of ["list_projects", "get_project_structure", "read_project_document", "search_project", "create_project_document"]) {
+    for (const name of [
+      "list_projects",
+      "get_project_structure",
+      "read_project_document",
+      "search_project",
+      "create_project_document",
+      "update_project_document",
+    ]) {
       expect(text).toContain(name);
     }
-    expect(text).not.toContain("update_project_document");
   });
 
-  it("surfaces stable write-domain codes as MCP tool errors", async () => {
+  it("surfaces stable create errors as MCP tool errors", async () => {
     const errorService: ProjectService = {
       ...service,
       createProjectDocument: async () => {
@@ -69,6 +75,30 @@ describe("MCP HTTP server", () => {
     expect(response.status).toBe(200);
     const text = await response.text();
     expect(text).toContain("FILE_EXISTS");
+    expect(text).toContain("isError");
+  });
+
+  it("surfaces STALE_FILE from guarded update as an MCP tool error", async () => {
+    const errorService: ProjectService = {
+      ...service,
+      updateProjectDocument: async () => {
+        throw new WriteDomainError("STALE_FILE", "document has changed since it was read");
+      },
+    };
+    const app = createApp({ service: errorService, token, allowedOrigins: [] });
+    const response = await rpc(app, "tools/call", {
+      name: "update_project_document",
+      arguments: {
+        project: "P033-GrandeGPT",
+        path: "PRD.md",
+        content: "replacement",
+        expectedSha256: "0".repeat(64),
+      },
+    });
+
+    expect(response.status).toBe(200);
+    const text = await response.text();
+    expect(text).toContain("STALE_FILE");
     expect(text).toContain("isError");
   });
 });

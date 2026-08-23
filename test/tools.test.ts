@@ -12,7 +12,7 @@ const service: ProjectService = {
 };
 
 describe("MCP tool manifest", () => {
-  it("exposes the four M1 read tools plus Safe Create with exact annotations", () => {
+  it("exposes exactly the approved six Phase 2 tools with exact annotations", () => {
     const tools = buildTools(service);
     expect(tools.map((tool) => tool.name).sort()).toEqual([
       "create_project_document",
@@ -20,16 +20,19 @@ describe("MCP tool manifest", () => {
       "list_projects",
       "read_project_document",
       "search_project",
+      "update_project_document",
     ]);
 
-    const create = tools.find((tool) => tool.name === "create_project_document");
-    expect(create?.annotations).toEqual({
-      readOnlyHint: false,
-      destructiveHint: false,
-      openWorldHint: false,
-    });
+    for (const name of ["create_project_document", "update_project_document"] as const) {
+      const write = tools.find((tool) => tool.name === name);
+      expect(write?.annotations).toEqual({
+        readOnlyHint: false,
+        destructiveHint: false,
+        openWorldHint: false,
+      });
+    }
 
-    for (const tool of tools.filter((candidate) => candidate.name !== "create_project_document")) {
+    for (const tool of tools.filter((candidate) => !["create_project_document", "update_project_document"].includes(candidate.name))) {
       expect(tool.annotations).toEqual({
         readOnlyHint: true,
         destructiveHint: false,
@@ -58,6 +61,28 @@ describe("MCP tool manifest", () => {
       path: "EMPTY.md",
       sha256: "1".repeat(64),
       totalBytes: 0,
+    });
+  });
+
+  it("requires expectedSha256 for update and exposes no force or overwrite bypass", async () => {
+    const tools = buildTools(service);
+    const update = tools.find((tool) => tool.name === "update_project_document");
+    expect(update?.inputSchema.required).toEqual(["project", "path", "content", "expectedSha256"]);
+    expect(Object.keys(update?.inputSchema.properties ?? {}).sort()).toEqual([
+      "content",
+      "expectedSha256",
+      "path",
+      "project",
+    ]);
+    await expect(update!.handler({
+      project: "P033-GrandeGPT",
+      path: "PRD.md",
+      content: "updated",
+      expectedSha256: "0".repeat(64),
+    })).resolves.toEqual({
+      path: "PRD.md",
+      sha256: "2".repeat(64),
+      totalBytes: 7,
     });
   });
 });
