@@ -4,7 +4,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { authorizeRequest, AuthError } from "./auth.ts";
 import type { ProjectService } from "./projectService.ts";
-import { buildReadTools, type ReadToolDef } from "./tools.ts";
+import { buildTools, type ToolDef } from "./tools.ts";
+import { WriteDomainError } from "./writeErrors.ts";
 
 export interface ServerOptions {
   service: ProjectService;
@@ -25,7 +26,7 @@ function assertLoopbackHost(hostHeader: string | undefined): void {
   if (!valid) throw new AuthError("FORBIDDEN", "non-loopback Host is not allowed");
 }
 
-function toZodShape(schema: ReadToolDef["inputSchema"]): ZodRawShape {
+function toZodShape(schema: ToolDef["inputSchema"]): ZodRawShape {
   const shape: Record<string, ZodTypeAny> = {};
   for (const [name, property] of Object.entries(schema.properties)) {
     let field: ZodTypeAny = property.type === "number" ? z.number() : z.string();
@@ -38,6 +39,20 @@ function toZodShape(schema: ReadToolDef["inputSchema"]): ZodRawShape {
 function jsonRpcResult(value: unknown): Record<string, unknown> {
   if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
   return { value };
+}
+
+function writeErrorResult(error: WriteDomainError) {
+  const structuredContent = {
+    error: {
+      code: error.code,
+      message: error.message,
+    },
+  };
+  return {
+    content: [{ type: "text" as const, text: JSON.stringify(structuredContent) }],
+    structuredContent,
+    isError: true,
+  };
 }
 
 export function createApp(options: ServerOptions): Hono {
@@ -63,7 +78,7 @@ export function createApp(options: ServerOptions): Hono {
       { capabilities: { tools: {} } },
     );
 
-    for (const tool of buildReadTools(options.service)) {
+    for (const tool of buildTools(options.service)) {
       server.registerTool(
         tool.name,
         {
@@ -72,11 +87,16 @@ export function createApp(options: ServerOptions): Hono {
           annotations: tool.annotations,
         },
         async (args) => {
-          const result = jsonRpcResult(await tool.handler(args as Record<string, unknown>));
-          return {
-            content: [{ type: "text" as const, text: JSON.stringify(result) }],
-            structuredContent: result,
-          };
+          try {
+            const result = jsonRpcResult(await tool.handler(args as Record<string, unknown>));
+            return {
+              content: [{ type: "text" as const, text: JSON.stringify(result) }],
+              structuredContent: result,
+            };
+          } catch (error) {
+            if (error instanceof WriteDomainError) return writeErrorResult(error);
+            throw error;
+          }
         },
       );
     }
