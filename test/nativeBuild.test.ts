@@ -19,11 +19,10 @@ describe("deterministic rename-excl native build", () => {
     expect(statSync(expected).mode & 0o111).not.toBe(0);
   });
 
-  it("keeps the compiled native/bin helper under Git ignore policy", () => {
-    // --no-index checks the policy itself even while an older checkpoint still has the
-    // generated helper tracked. A follow-up proof after removing that tracked artifact
-    // deliberately drops --no-index so a tracked binary would make this test fail again.
-    const result = spawnSync("git", ["check-ignore", "--no-index", "-q", "native/bin/rename-excl"], {
+  it("keeps the regenerated native/bin helper ignored and untracked", () => {
+    // Plain check-ignore deliberately excludes tracked paths. This only returns 0 when
+    // the freshly generated helper is both covered by .gitignore and no longer tracked.
+    const result = spawnSync("git", ["check-ignore", "-q", "native/bin/rename-excl"], {
       cwd: resolve("."),
       encoding: "utf8",
     });
