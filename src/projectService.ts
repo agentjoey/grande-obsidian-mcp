@@ -1,11 +1,13 @@
 import { PathPolicyError } from "./pathPolicy.ts";
 import {
+  createDirectory,
   createMarkdown,
   listMarkdownEntries,
   listProjects,
   moveMarkdown,
   readMarkdown,
   updateMarkdown,
+  type DirectoryWrite,
   type MarkdownMove,
   type MarkdownRead,
   type MarkdownWrite,
@@ -39,6 +41,7 @@ export interface ProjectService {
   createProjectDocument(project: string, path: string, content: string): Promise<MarkdownWrite>;
   updateProjectDocument(project: string, path: string, content: string, expectedSha256: string): Promise<MarkdownWrite>;
   moveProjectDocument(project: string, sourcePath: string, targetPath: string, expectedSha256: string): Promise<MarkdownMove>;
+  createProjectDirectory(project: string, path: string): Promise<DirectoryWrite>;
 }
 
 const DEFAULT_MAX_READ_BYTES = 32 * 1024;
@@ -139,5 +142,8 @@ export function createProjectService(options: ProjectServiceOptions): ProjectSer
         expectedSha(expectedSha256),
       );
     },
+
+    createProjectDirectory: (project, path) =>
+      createDirectory(options.projectRootPath, project, path),
   };
 }

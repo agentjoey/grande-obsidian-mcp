@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  resolveCreatableDirectory,
   resolveCreatableMarkdown,
   resolveExistingMarkdown,
   resolveMoveTargetMarkdown,
@@ -21,6 +22,7 @@ async function fixture() {
   const projectRoot = join(root, "10_Projects", "Active");
   const project = "P033-GrandeGPT";
   await mkdir(join(projectRoot, project, "design"), { recursive: true });
+  await writeFile(join(projectRoot, project, "PRD.md"), "# PRD\n", "utf8");
   await writeFile(join(projectRoot, project, "design", "architecture.md"), "# Architecture\n", "utf8");
   return { root, projectRoot, project };
 }
@@ -117,6 +119,64 @@ describe("project path policy", () => {
     await mkdir(outside);
     await symlink(outside, join(projectRoot, project, "linked-target"));
     await expect(resolveMoveTargetMarkdown(projectRoot, project, "linked-target/new.md"))
+      .rejects.toMatchObject({ code: "PATH_ESCAPE" });
+  });
+
+  it("resolves an absent directory leaf only under existing real parents", async () => {
+    const { projectRoot, project } = await fixture();
+    await expect(resolveCreatableDirectory(projectRoot, project, "archive"))
+      .resolves.toBe(join(projectRoot, project, "archive"));
+    await expect(resolveCreatableDirectory(projectRoot, project, "design/archive"))
+      .resolves.toBe(join(projectRoot, project, "design", "archive"));
+  });
+
+  it("requires every directory parent to already exist", async () => {
+    const { projectRoot, project } = await fixture();
+    await expect(resolveCreatableDirectory(projectRoot, project, "missing/child"))
+      .rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("rejects any existing directory-create target", async () => {
+    const { projectRoot, project } = await fixture();
+    await expect(resolveCreatableDirectory(projectRoot, project, "design"))
+      .rejects.toMatchObject({ code: "ALREADY_EXISTS" });
+    await expect(resolveCreatableDirectory(projectRoot, project, "PRD.md"))
+      .rejects.toMatchObject({ code: "ALREADY_EXISTS" });
+  });
+
+  it.each([
+    "",
+    "../archive",
+    "/tmp/archive",
+    ".hidden/archive",
+    "design//archive",
+    "design\\archive",
+    "design/../archive",
+    "design/evil\u202E",
+    "design/evil\n",
+  ])("rejects unsafe directory path %j", async (path) => {
+    const { projectRoot, project } = await fixture();
+    await expect(resolveCreatableDirectory(projectRoot, project, path)).rejects.toThrow();
+  });
+
+  it("allows directory names that happen to end in .md", async () => {
+    const { projectRoot, project } = await fixture();
+    await expect(resolveCreatableDirectory(projectRoot, project, "design/archive.md"))
+      .resolves.toBe(join(projectRoot, project, "design", "archive.md"));
+  });
+
+  it("rejects symlink parents and symlink targets for directories", async () => {
+    const { root, projectRoot, project } = await fixture();
+    const outsideParent = join(root, "outside-directory-parent");
+    await mkdir(outsideParent);
+    await symlink(outsideParent, join(projectRoot, project, "linked-directory-parent"));
+    await expect(resolveCreatableDirectory(projectRoot, project, "linked-directory-parent/child"))
+      .rejects.toMatchObject({ code: "PATH_ESCAPE" });
+
+    const outsideTarget = join(root, "outside-directory-target");
+    await mkdir(outsideTarget);
+    await symlink(outsideTarget, join(projectRoot, project, "design", "linked-directory-target"));
+    await expect(resolveCreatableDirectory(projectRoot, project, "design/linked-directory-target"))
       .rejects.toMatchObject({ code: "PATH_ESCAPE" });
   });
 });

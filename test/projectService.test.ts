@@ -153,4 +153,30 @@ describe("project service", () => {
     await expect(service.moveProjectDocument(project, "PRD.md", "design/MOVED.md", "BAD"))
       .rejects.toMatchObject({ code: "INVALID_INPUT" });
   });
+
+  it("creates a project directory and composes with document create", async () => {
+    const { projectRootPath, project } = await fixture();
+    const service = createProjectService({ projectRootPath });
+
+    await expect(service.createProjectDirectory(project, "design/archive"))
+      .resolves.toEqual({ path: "design/archive" });
+    await expect(service.createProjectDocument(project, "design/archive/NOTE.md", "# Note\n"))
+      .resolves.toMatchObject({ path: "design/archive/NOTE.md" });
+    await expect(readFile(join(projectRootPath, project, "design", "archive", "NOTE.md"), "utf8"))
+      .resolves.toBe("# Note\n");
+  });
+
+  it("moves an existing Markdown document into a newly created directory without changing bytes", async () => {
+    buildRenameExcl(resolve("."));
+    const { projectRootPath, project } = await fixture();
+    const service = createProjectService({ projectRootPath });
+    const source = join(projectRootPath, project, "PRD.md");
+    const bytes = await readFile(source);
+    const expectedSha256 = createHash("sha256").update(bytes).digest("hex");
+
+    await service.createProjectDirectory(project, "archive");
+    await expect(service.moveProjectDocument(project, "PRD.md", "archive/PRD.md", expectedSha256))
+      .resolves.toMatchObject({ sha256: expectedSha256, totalBytes: bytes.byteLength });
+    await expect(readFile(join(projectRootPath, project, "archive", "PRD.md"))).resolves.toEqual(bytes);
+  });
 });

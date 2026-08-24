@@ -10,14 +10,16 @@ const service: ProjectService = {
   createProjectDocument: async (_project, path, content) => ({ path, sha256: "1".repeat(64), totalBytes: Buffer.byteLength(content) }),
   updateProjectDocument: async (_project, path, content) => ({ path, sha256: "2".repeat(64), totalBytes: Buffer.byteLength(content) }),
   moveProjectDocument: async (_project, sourcePath, targetPath) => ({ sourcePath, targetPath, sha256: "3".repeat(64), totalBytes: 9 }),
+  createProjectDirectory: async (_project, path) => ({ path }),
 };
 
 const SHA256_PATTERN = "^[0-9a-f]{64}$";
 
 describe("MCP tool manifest", () => {
-  it("exposes exactly the approved seven Phase 3 tools with exact annotations", () => {
+  it("exposes exactly the approved eight Phase 4 tools with exact annotations", () => {
     const tools = buildTools(service);
     expect(tools.map((tool) => tool.name).sort()).toEqual([
+      "create_project_directory",
       "create_project_document",
       "get_project_structure",
       "list_projects",
@@ -27,7 +29,7 @@ describe("MCP tool manifest", () => {
       "update_project_document",
     ]);
 
-    for (const name of ["create_project_document", "update_project_document", "move_project_document"] as const) {
+    for (const name of ["create_project_document", "update_project_document", "move_project_document", "create_project_directory"] as const) {
       const write = tools.find((tool) => tool.name === name);
       expect(write?.annotations).toEqual({
         readOnlyHint: false,
@@ -36,7 +38,7 @@ describe("MCP tool manifest", () => {
       });
     }
 
-    for (const tool of tools.filter((candidate) => !["create_project_document", "update_project_document", "move_project_document"].includes(candidate.name))) {
+    for (const tool of tools.filter((candidate) => !["create_project_document", "update_project_document", "move_project_document", "create_project_directory"].includes(candidate.name))) {
       expect(tool.annotations).toEqual({
         readOnlyHint: true,
         destructiveHint: false,
@@ -49,6 +51,7 @@ describe("MCP tool manifest", () => {
     const tools = buildTools(service);
     const projectTools = tools.filter((tool) => "project" in tool.inputSchema.properties);
     expect(projectTools.map((tool) => tool.name).sort()).toEqual([
+      "create_project_directory",
       "create_project_document",
       "get_project_structure",
       "move_project_document",
@@ -130,5 +133,21 @@ describe("MCP tool manifest", () => {
       sha256: "3".repeat(64),
       totalBytes: 9,
     });
+  });
+
+  it("exposes directory creation with exactly two approved inputs and no bypass knobs", async () => {
+    const tools = buildTools(service);
+    const directory = tools.find((tool) => tool.name === "create_project_directory");
+    expect(directory).toBeDefined();
+    expect(directory?.inputSchema.required).toEqual(["project", "path"]);
+    expect(Object.keys(directory?.inputSchema.properties ?? {}).sort()).toEqual(["path", "project"]);
+    expect((directory?.inputSchema as unknown as { additionalProperties?: boolean }).additionalProperties).toBe(false);
+    for (const forbidden of ["recursive", "parents", "force", "overwrite", "mode", "sourceProject", "targetProject"]) {
+      expect(directory?.inputSchema.properties).not.toHaveProperty(forbidden);
+    }
+    expect(directory?.description).toMatch(/non-recursive/i);
+    expect(directory?.description).toMatch(/parent.*already exist/i);
+    await expect(directory!.handler({ project: "P033-GrandeGPT", path: "Archive" }))
+      .resolves.toEqual({ path: "Archive" });
   });
 });

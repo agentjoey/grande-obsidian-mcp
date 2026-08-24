@@ -7,7 +7,8 @@ export type ToolName =
   | "search_project"
   | "create_project_document"
   | "update_project_document"
-  | "move_project_document";
+  | "move_project_document"
+  | "create_project_directory";
 
 export interface ToolDef {
   name: ToolName;
@@ -179,6 +180,25 @@ export function buildTools(service: ProjectService): ToolDef[] {
           requiredString(args, "sourcePath"),
           requiredString(args, "targetPath"),
           requiredString(args, "expectedSha256"),
+        ),
+    },
+    {
+      name: "create_project_directory",
+      description: "Safely create one non-recursive project directory; all parent directories must already exist and an existing target is never overwritten.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project: { type: "string", description: PROJECT_ARG_DESCRIPTION },
+          path: { type: "string", description: "Project-relative directory path; all parent directories must already exist." },
+        },
+        required: ["project", "path"],
+        additionalProperties: false,
+      },
+      annotations: SAFE_WRITE,
+      handler: (args) =>
+        service.createProjectDirectory(
+          requiredString(args, "project"),
+          requiredString(args, "path"),
         ),
     },
   ];
