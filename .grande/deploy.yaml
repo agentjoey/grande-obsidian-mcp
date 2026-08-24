@@ -1,0 +1,4 @@
+deploy:
+  profile: deploy-production
+verify:
+  profile: verify-production

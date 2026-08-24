@@ -13,6 +13,7 @@
     "start": "node --disable-warning=ExperimentalWarning src/main.ts",
     "native:build": "node --disable-warning=ExperimentalWarning ops/native/buildRenameExcl.ts",
     "launchd:install": "node --disable-warning=ExperimentalWarning ops/launchd/install.ts",
+    "launchd:verify": "node --disable-warning=ExperimentalWarning ops/launchd/verify.ts",
     "launchd:uninstall": "node --disable-warning=ExperimentalWarning ops/launchd/uninstall.ts"
   },
   "dependencies": {

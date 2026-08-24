@@ -1,33 +1,14 @@
-import { spawnSync } from "node:child_process";
 import { mkdtemp, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-
-function compileHelper(output: string): void {
-  const result = spawnSync("/usr/bin/clang", [
-    "-std=c11",
-    "-Wall",
-    "-Wextra",
-    "-Werror",
-    "-O2",
-    resolve("native/rename-excl.c"),
-    "-o",
-    output,
-  ], { encoding: "utf8" });
-
-  expect(result.error).toBeUndefined();
-  expect(result.status, result.stderr).toBe(0);
-}
+import { buildRenameExcl } from "../ops/native/buildRenameExcl.js";
 
 async function buildRepoOwnedHelper(): Promise<string> {
-  // Compile to the same exact repo-owned path approved by the trusted GrandeGPT profile
-  // and used by the production default. A test-only sibling path would require a second
-  // execution grant and would weaken the exact-path boundary purely for fixture convenience.
-  const helper = resolve("native/bin/rename-excl");
-  await mkdir(dirname(helper), { recursive: true });
-  compileHelper(helper);
-  return helper;
+  // Build through the same atomic repo-owned publisher used by production. Direct
+  // clang -o to the shared native/bin/rename-excl path can truncate the live helper
+  // while another Vitest worker is self-checking or executing it.
+  return buildRenameExcl(resolve("."));
 }
 
 async function loadExclusiveRename() {

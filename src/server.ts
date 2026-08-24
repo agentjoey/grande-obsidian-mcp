@@ -7,9 +7,12 @@ import type { ProjectService } from "./projectService.ts";
 import { buildTools, type ToolDef } from "./tools.ts";
 import { WriteDomainError } from "./writeErrors.ts";
 
+const BUILD_SHA_HEADER = "X-Grande-Obsidian-Build-Sha";
+
 export interface ServerOptions {
   service: ProjectService;
   token: string;
+  buildSha: string;
   allowedOrigins: readonly string[];
 }
 
@@ -59,6 +62,7 @@ export function createApp(options: ServerOptions): Hono {
   const app = new Hono();
 
   app.all("/mcp", async (c) => {
+    c.header(BUILD_SHA_HEADER, options.buildSha);
     try {
       assertLoopbackHost(c.req.header("host"));
       authorizeRequest(c.req.raw.headers, options.token, options.allowedOrigins);
@@ -102,7 +106,9 @@ export function createApp(options: ServerOptions): Hono {
     }
 
     await server.connect(transport);
-    return transport.handleRequest(c.req.raw);
+    const response = await transport.handleRequest(c.req.raw);
+    response.headers.set(BUILD_SHA_HEADER, options.buildSha);
+    return response;
   });
 
   return app;
