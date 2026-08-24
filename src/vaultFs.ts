@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
-import { lstat, readdir, readFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import { exclusiveRename } from "./exclusiveRename.ts";
 import { atomicCreateFile, atomicWriteFile } from "./filePrimitives.ts";
 import {
   PathPolicyError,
+  resolveCreatableDirectory,
   resolveCreatableMarkdown,
   resolveExistingMarkdown,
   resolveMoveTargetMarkdown,
@@ -48,8 +49,23 @@ export interface MarkdownMove {
   totalBytes: number;
 }
 
+export interface DirectoryWrite {
+  path: string;
+}
+
 export interface MoveDependencies {
   exclusiveRename: typeof exclusiveRename;
+}
+
+interface DirectoryDependencies {
+  resolveCreatableDirectory: typeof resolveCreatableDirectory;
+  mkdir: (path: string) => Promise<unknown>;
+  verifyCreatedDirectory: (
+    projectRootPath: string,
+    project: string,
+    logicalPath: string,
+    expectedAbsolutePath: string,
+  ) => Promise<void>;
 }
 
 interface GuardedSource {
@@ -143,6 +159,30 @@ async function verifyWrittenFile(targetPath: string, expectedSha256: string): Pr
   }
 }
 
+async function verifyCreatedDirectory(
+  projectRootPath: string,
+  project: string,
+  logical: string,
+  expectedAbsolutePath: string,
+): Promise<void> {
+  try {
+    const projectPath = await resolveProjectDirectory(projectRootPath, project);
+    let current = projectPath;
+    for (const segment of logical.split("/")) {
+      current = join(current, segment);
+      const stat = await lstat(current);
+      if (stat.isSymbolicLink() || !stat.isDirectory()) {
+        throw new Error("directory state changed after creation");
+      }
+    }
+    if (current !== expectedAbsolutePath) {
+      throw new Error("directory target changed after creation");
+    }
+  } catch {
+    throw new WriteDomainError("VERIFY_FAILED", "created directory could not be verified");
+  }
+}
+
 export async function listProjects(projectRootPath: string): Promise<ProjectSummary[]> {
   const rootStat = await lstat(projectRootPath);
   if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
@@ -225,6 +265,51 @@ export async function readMarkdown(
     totalBytes: full.byteLength,
     truncated: full.byteLength > maxBytes,
   };
+}
+
+export async function createDirectory(
+  projectRootPath: string,
+  project: string,
+  path: string,
+  dependencies: Partial<DirectoryDependencies> = {},
+): Promise<DirectoryWrite> {
+  const deps: DirectoryDependencies = {
+    resolveCreatableDirectory,
+    mkdir,
+    verifyCreatedDirectory,
+    ...dependencies,
+  };
+
+  let targetPath: string;
+  try {
+    targetPath = await deps.resolveCreatableDirectory(projectRootPath, project, path);
+    const revalidatedTarget = await deps.resolveCreatableDirectory(projectRootPath, project, path);
+    if (revalidatedTarget !== targetPath) {
+      throw new WriteDomainError("POLICY_DENIED", "directory target changed during validation");
+    }
+    await deps.mkdir(targetPath);
+  } catch (error) {
+    if (nodeErrorCode(error) === "EEXIST") {
+      try {
+        const stat = await lstat(targetPath!);
+        if (stat.isSymbolicLink()) {
+          throw new WriteDomainError("POLICY_DENIED", "write path is denied by project policy");
+        }
+      } catch (inspectError) {
+        if (inspectError instanceof WriteDomainError) throw inspectError;
+      }
+    }
+    throw toWriteDomainError(error);
+  }
+
+  try {
+    await deps.verifyCreatedDirectory(projectRootPath, project, path, targetPath);
+  } catch (error) {
+    if (error instanceof WriteDomainError && error.code === "VERIFY_FAILED") throw error;
+    throw new WriteDomainError("VERIFY_FAILED", "created directory could not be verified");
+  }
+
+  return { path };
 }
 
 export async function createMarkdown(
