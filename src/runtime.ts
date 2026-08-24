@@ -6,6 +6,7 @@ import { createApp } from "./server.ts";
 export interface RuntimeSettings {
   configPath: string;
   token: string;
+  buildSha: string;
   host: "127.0.0.1";
   port: number;
   allowedOrigins: string[];
@@ -21,6 +22,13 @@ function requiredEnv(env: NodeJS.ProcessEnv, name: string): string {
   const value = env[name]?.trim();
   if (!value) throw new Error(`${name} is required`);
   return value;
+}
+
+function parseBuildSha(value: string | undefined): string {
+  const normalized = value?.trim();
+  if (!normalized) return "dev";
+  if (normalized === "dev" || /^[0-9a-f]{40}$/.test(normalized)) return normalized;
+  throw new Error("GRANDE_OBSIDIAN_BUILD_SHA must be 'dev' or a lowercase 40-character Git SHA");
 }
 
 function parsePort(value: string | undefined): number {
@@ -45,6 +53,7 @@ export function loadRuntimeSettings(env: NodeJS.ProcessEnv): RuntimeSettings {
   return {
     configPath: requiredEnv(env, "GRANDE_OBSIDIAN_CONFIG"),
     token: requiredEnv(env, "GRANDE_OBSIDIAN_TOKEN"),
+    buildSha: parseBuildSha(env.GRANDE_OBSIDIAN_BUILD_SHA),
     host: "127.0.0.1",
     port: parsePort(env.PORT),
     allowedOrigins: parseAllowedOrigins(env.GRANDE_OBSIDIAN_ALLOWED_ORIGINS),
@@ -57,6 +66,7 @@ export async function createRuntime(settings: RuntimeSettings): Promise<Runtime>
   const app = createApp({
     service,
     token: settings.token,
+    buildSha: settings.buildSha,
     allowedOrigins: settings.allowedOrigins,
   });
   return { app, config, settings };

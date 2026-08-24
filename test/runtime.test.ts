@@ -13,21 +13,36 @@ afterEach(async () => {
 });
 
 describe("runtime settings", () => {
-  it("uses a fixed loopback host and loads explicit config, token, port, and Origin allowlist", () => {
+  it("uses a fixed loopback host and loads explicit config, token, build identity, port, and Origin allowlist", () => {
     expect(
       loadRuntimeSettings({
         GRANDE_OBSIDIAN_CONFIG: "/tmp/grande-obsidian.yaml",
         GRANDE_OBSIDIAN_TOKEN: "secret-token",
+        GRANDE_OBSIDIAN_BUILD_SHA: "a".repeat(40),
         GRANDE_OBSIDIAN_ALLOWED_ORIGINS: "https://chatgpt.com, https://chat.openai.com",
         PORT: "8788",
       }),
     ).toEqual({
       configPath: "/tmp/grande-obsidian.yaml",
       token: "secret-token",
+      buildSha: "a".repeat(40),
       host: "127.0.0.1",
       port: 8788,
       allowedOrigins: ["https://chatgpt.com", "https://chat.openai.com"],
     });
+  });
+
+  it("defaults local runtime identity to dev and rejects malformed explicit build identity", () => {
+    expect(loadRuntimeSettings({
+      GRANDE_OBSIDIAN_CONFIG: "/tmp/config.yaml",
+      GRANDE_OBSIDIAN_TOKEN: "secret-token",
+    })).toMatchObject({ buildSha: "dev" });
+
+    expect(() => loadRuntimeSettings({
+      GRANDE_OBSIDIAN_CONFIG: "/tmp/config.yaml",
+      GRANDE_OBSIDIAN_TOKEN: "secret-token",
+      GRANDE_OBSIDIAN_BUILD_SHA: "not-a-sha",
+    })).toThrow(/BUILD_SHA/);
   });
 
   it("fails closed when config path, token, or port is invalid", () => {
@@ -61,6 +76,7 @@ describe("runtime settings", () => {
     const runtime = await createRuntime({
       configPath,
       token: "secret-token",
+      buildSha: "dev",
       host: "127.0.0.1",
       port: 8788,
       allowedOrigins: [],

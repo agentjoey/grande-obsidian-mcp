@@ -4,6 +4,7 @@ import type { ProjectService } from "../src/projectService.js";
 import { WriteDomainError } from "../src/writeErrors.js";
 
 const token = "test-token-0123456789";
+const buildSha = "a".repeat(40);
 const service: ProjectService = {
   listProjects: async () => [{ id: "P033", name: "GrandeGPT", directory: "P033-GrandeGPT" }],
   getProjectStructure: async () => ({ entries: [{ path: "PRD.md", kind: "file" }], truncated: false }),
@@ -34,20 +35,23 @@ async function rpc(app: ReturnType<typeof createApp>, method: string, params: Re
 }
 
 describe("MCP HTTP server", () => {
-  it("fails closed on missing bearer, unlisted Origin, and non-loopback Host", async () => {
-    const app = createApp({ service, token, allowedOrigins: [] });
+  it("fails closed on missing bearer, unlisted Origin, and non-loopback Host while exposing build identity", async () => {
+    const app = createApp({ service, token, buildSha, allowedOrigins: [] });
     const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} });
 
-    expect((await app.request("/mcp", { method: "POST", headers: { host: "127.0.0.1:8788", "content-type": "application/json" }, body })).status).toBe(401);
+    const denied = await app.request("/mcp", { method: "POST", headers: { host: "127.0.0.1:8788", "content-type": "application/json" }, body });
+    expect(denied.status).toBe(401);
+    expect(denied.headers.get("X-Grande-Obsidian-Build-Sha")).toBe(buildSha);
     expect((await app.request("/mcp", { method: "POST", headers: rpcHeaders({ origin: "https://evil.example" }), body })).status).toBe(403);
     expect((await app.request("/mcp", { method: "POST", headers: rpcHeaders({ host: "evil.example" }), body })).status).toBe(403);
   });
 
-  it("serves all eight approved Phase 4 tools through Streamable HTTP MCP", async () => {
-    const app = createApp({ service, token, allowedOrigins: [] });
+  it("serves all eight approved Phase 4 tools through Streamable HTTP MCP with build identity", async () => {
+    const app = createApp({ service, token, buildSha, allowedOrigins: [] });
     const response = await rpc(app, "tools/list", {});
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("X-Grande-Obsidian-Build-Sha")).toBe(buildSha);
     const text = await response.text();
     for (const name of [
       "list_projects",
@@ -63,6 +67,21 @@ describe("MCP HTTP server", () => {
     }
   });
 
+  it("keeps MCP server version independent from build identity", async () => {
+    const app = createApp({ service, token, buildSha, allowedOrigins: [] });
+    const response = await rpc(app, "initialize", {
+      protocolVersion: "2025-06-18",
+      capabilities: {},
+      clientInfo: { name: "phase5-test", version: "1.0.0" },
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("X-Grande-Obsidian-Build-Sha")).toBe(buildSha);
+    const text = await response.text();
+    expect(text).toContain('"version":"0.1.0"');
+    expect(text).not.toContain(buildSha);
+  });
+
   it("surfaces stable create errors as MCP tool errors", async () => {
     const errorService: ProjectService = {
       ...service,
@@ -70,7 +89,7 @@ describe("MCP HTTP server", () => {
         throw new WriteDomainError("FILE_EXISTS", "create target already exists");
       },
     };
-    const app = createApp({ service: errorService, token, allowedOrigins: [] });
+    const app = createApp({ service: errorService, token, buildSha, allowedOrigins: [] });
     const response = await rpc(app, "tools/call", {
       name: "create_project_document",
       arguments: { project: "P033-GrandeGPT", path: "PRD.md", content: "replacement" },
@@ -89,7 +108,7 @@ describe("MCP HTTP server", () => {
         throw new WriteDomainError("STALE_FILE", "document has changed since it was read");
       },
     };
-    const app = createApp({ service: errorService, token, allowedOrigins: [] });
+    const app = createApp({ service: errorService, token, buildSha, allowedOrigins: [] });
     const response = await rpc(app, "tools/call", {
       name: "update_project_document",
       arguments: {
