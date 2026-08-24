@@ -1,8 +1,15 @@
 import { createHash } from "node:crypto";
 import { lstat, readdir, readFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
+import { exclusiveRename } from "./exclusiveRename.ts";
 import { atomicCreateFile, atomicWriteFile } from "./filePrimitives.ts";
-import { PathPolicyError, resolveCreatableMarkdown, resolveExistingMarkdown, resolveProjectDirectory } from "./pathPolicy.ts";
+import {
+  PathPolicyError,
+  resolveCreatableMarkdown,
+  resolveExistingMarkdown,
+  resolveMoveTargetMarkdown,
+  resolveProjectDirectory,
+} from "./pathPolicy.ts";
 import { toWriteDomainError, WriteDomainError } from "./writeErrors.ts";
 
 export interface ProjectSummary {
@@ -34,6 +41,26 @@ export interface MarkdownWrite {
   totalBytes: number;
 }
 
+export interface MarkdownMove {
+  sourcePath: string;
+  targetPath: string;
+  sha256: string;
+  totalBytes: number;
+}
+
+export interface MoveDependencies {
+  exclusiveRename: typeof exclusiveRename;
+}
+
+interface GuardedSource {
+  absolutePath: string;
+  projectPath: string;
+  sha256: string;
+  totalBytes: number;
+  dev: number;
+  ino: number;
+}
+
 function lexicalName(a: { name: string }, b: { name: string }): number {
   return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
 }
@@ -44,6 +71,65 @@ function logicalPath(root: string, absolute: string): string {
 
 function sha256(content: Uint8Array): string {
   return createHash("sha256").update(content).digest("hex");
+}
+
+function nodeErrorCode(error: unknown): string | undefined {
+  if (!(error instanceof Error) || !("code" in error)) return undefined;
+  return (error as NodeJS.ErrnoException).code;
+}
+
+function sameIdentity(a: Pick<GuardedSource, "dev" | "ino">, b: Pick<GuardedSource, "dev" | "ino">): boolean {
+  return a.dev === b.dev && a.ino === b.ino;
+}
+
+async function guardedSnapshot(absolutePath: string, projectPath: string): Promise<GuardedSource> {
+  const before = await lstat(absolutePath);
+  if (before.isSymbolicLink() || !before.isFile()) {
+    throw new WriteDomainError("POLICY_DENIED", "move source must remain a real file");
+  }
+  const bytes = await readFile(absolutePath);
+  const after = await lstat(absolutePath);
+  if (!sameIdentity({ dev: before.dev, ino: before.ino }, { dev: after.dev, ino: after.ino })) {
+    throw new WriteDomainError("STALE_FILE", "document identity changed while it was being guarded");
+  }
+  return {
+    absolutePath,
+    projectPath,
+    sha256: sha256(bytes),
+    totalBytes: bytes.byteLength,
+    dev: after.dev,
+    ino: after.ino,
+  };
+}
+
+async function inspectExistingMarkdown(
+  projectRootPath: string,
+  project: string,
+  logical: string,
+  projectPath: string,
+): Promise<GuardedSource | null> {
+  try {
+    const absolute = await resolveExistingMarkdown(projectRootPath, project, logical);
+    return await guardedSnapshot(absolute, projectPath);
+  } catch {
+    return null;
+  }
+}
+
+async function pathIsAbsent(path: string): Promise<boolean> {
+  try {
+    await lstat(path);
+    return false;
+  } catch (error) {
+    return nodeErrorCode(error) === "ENOENT";
+  }
+}
+
+function isExactGuardedState(state: GuardedSource | null, guarded: GuardedSource): boolean {
+  return state !== null &&
+    sameIdentity(state, guarded) &&
+    state.sha256 === guarded.sha256 &&
+    state.totalBytes === guarded.totalBytes;
 }
 
 async function verifyWrittenFile(targetPath: string, expectedSha256: string): Promise<void> {
@@ -209,4 +295,92 @@ export async function updateMarkdown(
 
   await verifyWrittenFile(targetPath, intendedSha);
   return { path, sha256: intendedSha, totalBytes: content.byteLength };
+}
+
+export async function moveMarkdown(
+  projectRootPath: string,
+  project: string,
+  sourcePath: string,
+  targetPath: string,
+  expectedSha256: string,
+  dependencies?: MoveDependencies,
+): Promise<MarkdownMove> {
+  if (sourcePath === targetPath) {
+    throw new WriteDomainError("INVALID_INPUT", "source and target paths must be different");
+  }
+
+  let projectPath: string;
+  let targetAbsolute: string;
+  let guarded: GuardedSource;
+  try {
+    projectPath = await resolveProjectDirectory(projectRootPath, project);
+    const sourceAbsolute = await resolveExistingMarkdown(projectRootPath, project, sourcePath);
+    targetAbsolute = await resolveMoveTargetMarkdown(projectRootPath, project, targetPath);
+    guarded = await guardedSnapshot(sourceAbsolute, projectPath);
+  } catch (error) {
+    throw toWriteDomainError(error);
+  }
+
+  if (guarded.sha256 !== expectedSha256) {
+    throw new WriteDomainError("STALE_FILE", "document has changed since it was read");
+  }
+
+  // Resolve the test-only dependency after the initial guarded snapshot. A getter may be used
+  // by deterministic race tests to inject a mutation at exactly the point that the mandatory
+  // mutation-time revalidation must catch. Production dependencies are plain objects.
+  const renameExclusive = dependencies?.exclusiveRename ?? exclusiveRename;
+
+  try {
+    const sourceAbsolute = await resolveExistingMarkdown(projectRootPath, project, sourcePath);
+    if (sourceAbsolute !== guarded.absolutePath) {
+      throw new WriteDomainError("STALE_FILE", "move source path changed before rename");
+    }
+    const latest = await guardedSnapshot(sourceAbsolute, projectPath);
+    if (latest.sha256 !== guarded.sha256 || !sameIdentity(latest, guarded)) {
+      throw new WriteDomainError("STALE_FILE", "document changed before exclusive rename");
+    }
+    const latestTarget = await resolveMoveTargetMarkdown(projectRootPath, project, targetPath);
+    if (latestTarget !== targetAbsolute) {
+      throw new WriteDomainError("POLICY_DENIED", "move target changed during validation");
+    }
+  } catch (error) {
+    throw toWriteDomainError(error);
+  }
+
+  try {
+    await renameExclusive(projectPath, sourcePath, targetPath);
+  } catch (error) {
+    throw toWriteDomainError(error);
+  }
+
+  const finalTarget = await inspectExistingMarkdown(projectRootPath, project, targetPath, projectPath);
+  const sourceAbsent = await pathIsAbsent(guarded.absolutePath);
+  if (isExactGuardedState(finalTarget, guarded) && sourceAbsent) {
+    return {
+      sourcePath,
+      targetPath,
+      sha256: guarded.sha256,
+      totalBytes: guarded.totalBytes,
+    };
+  }
+
+  // Reverse recovery is safe only while the target is still the exact moved filesystem identity
+  // and the original source path is absent. Never move a different/competing target back.
+  if (finalTarget === null || !sameIdentity(finalTarget, guarded) || !sourceAbsent) {
+    throw new WriteDomainError("VERIFY_FAILED", "move result could not be safely verified or restored");
+  }
+
+  try {
+    await renameExclusive(projectPath, targetPath, sourcePath);
+  } catch {
+    throw new WriteDomainError("VERIFY_FAILED", "move recovery could not safely restore the source");
+  }
+
+  const restored = await inspectExistingMarkdown(projectRootPath, project, sourcePath, projectPath);
+  const targetAbsent = await pathIsAbsent(targetAbsolute);
+  if (isExactGuardedState(restored, guarded) && targetAbsent) {
+    throw new WriteDomainError("STALE_FILE", "move raced with an external mutation and was safely restored");
+  }
+
+  throw new WriteDomainError("VERIFY_FAILED", "move recovery result could not be verified");
 }
