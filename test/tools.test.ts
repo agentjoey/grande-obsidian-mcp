@@ -109,6 +109,7 @@ describe("MCP tool manifest", () => {
       "sourcePath",
       "targetPath",
     ]);
+    expect((move?.inputSchema as unknown as { additionalProperties?: boolean }).additionalProperties).toBe(false);
     for (const forbidden of ["force", "overwrite", "updateLinks", "createParents", "sourceProject", "targetProject"]) {
       expect(move?.inputSchema.properties).not.toHaveProperty(forbidden);
     }

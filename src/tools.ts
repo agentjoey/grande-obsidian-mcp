@@ -16,6 +16,7 @@ export interface ToolDef {
     type: "object";
     properties: Record<string, { type: "string" | "number"; description?: string }>;
     required?: string[];
+    additionalProperties?: false;
   };
   annotations: {
     readOnlyHint: boolean;
@@ -169,6 +170,7 @@ export function buildTools(service: ProjectService): ToolDef[] {
           expectedSha256: { type: "string" },
         },
         required: ["project", "sourcePath", "targetPath", "expectedSha256"],
+        additionalProperties: false,
       },
       annotations: SAFE_WRITE,
       handler: (args) =>
