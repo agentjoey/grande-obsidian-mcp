@@ -68,6 +68,26 @@ describe("launchd packaging", () => {
     expect(buildCall).toBeLessThan(bootstrapCall);
   });
 
+  it("waits for bootout completion before bootstrap", async () => {
+    const installer = await readFile(resolve("ops/launchd/install.ts"), "utf8");
+    const bootoutCall = installer.indexOf('run("/bin/launchctl", ["bootout", serviceTarget])');
+    const waitCall = installer.indexOf("waitUntilUnloaded(serviceTarget)", bootoutCall);
+    const bootstrapCall = installer.indexOf('run("/bin/launchctl", ["bootstrap", domain, plistPath])');
+
+    expect(bootoutCall).toBeGreaterThanOrEqual(0);
+    expect(waitCall).toBeGreaterThan(bootoutCall);
+    expect(bootstrapCall).toBeGreaterThan(waitCall);
+  });
+
+  it("uses RunAtLoad readiness instead of racing bootstrap with kickstart -k", async () => {
+    const installer = await readFile(resolve("ops/launchd/install.ts"), "utf8");
+
+    expect(installer).toContain("waitUntilReady(serviceTarget)");
+    expect(installer).toContain("http://127.0.0.1:${LAUNCHD_PORT}/mcp");
+    expect(installer).toContain('probe.stdout.trim() === "401"');
+    expect(installer).not.toContain('["kickstart", "-k", serviceTarget]');
+  });
+
   it("ships a token-file launcher plus install and uninstall entrypoints", async () => {
     const runnerPath = resolve("ops/launchd/run.ts");
     const installPath = resolve("ops/launchd/install.ts");
@@ -88,7 +108,7 @@ describe("launchd packaging", () => {
     expect(installer).toContain("process.execPath");
     expect(installer).toContain("node_modules");
     expect(installer).toContain("bootstrap");
-    expect(installer).toContain("kickstart");
+    expect(installer).toContain("waitUntilReady");
 
     const uninstaller = await readFile(uninstallPath, "utf8");
     expect(uninstaller).toContain("bootout");
