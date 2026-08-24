@@ -1,9 +1,12 @@
 # grande-obsidian-mcp Phase 3 Closeout
 
 **Date:** 2026-08-24  
-**Phase:** Phase 3 / Safe Move & Rename Core  
-**Feature baseline:** canonical merge `d3f2722f5323a9311f87afc7744ac39bd5509be8`  
-**Acceptance task:** `task-gomcp-phase3-acceptance-20260824-001`
+**Phase:** Phase 3 / Safe Move & Rename Core — CLOSED  
+**Implementation baseline:** canonical merge `d3f2722f5323a9311f87afc7744ac39bd5509be8`  
+**Acceptance task:** `task-gomcp-phase3-acceptance-20260824-001`  
+**Acceptance hardening commit:** `410c3e5a61c788ffafaaafcd2c1dcb4cb8e6cab6`  
+**Closeout PR:** `#5`  
+**Final canonical closeout merge:** `6dfc9b77318acb8ea57a0d6eb2c8df3e6fa8120c`
 
 ## Live provider contract
 
@@ -66,7 +69,7 @@ Activation exposed two installer timing weaknesses outside the public seven-tool
 1. `bootout` could be followed by `bootstrap` before launchd had fully removed the previous service registration.
 2. The plist already uses `RunAtLoad=true` and `KeepAlive=true`; immediately issuing `kickstart -k` after `bootstrap` could terminate the process that bootstrap had just started while the HTTP endpoint was still becoming ready.
 
-The installer was hardened in this acceptance task without widening product scope:
+The installer was hardened in the acceptance task without widening product scope:
 
 - after a loaded service is booted out, installation now polls `launchctl print` until the old service is actually absent, with a bounded timeout;
 - the redundant post-bootstrap `kickstart -k` was removed;
@@ -78,8 +81,12 @@ Fresh validation after the installer fix:
 - unit: **14 test files / 106 tests passed**;
 - typecheck: **passed**.
 
+The hardening and this acceptance record were merged through PR `#5`; canonical `main` was refreshed to `6dfc9b77318acb8ea57a0d6eb2c8df3e6fa8120c`. A post-merge live capability check still returned the exact seven-tool contract.
+
 ## Closeout decision
 
 The real S5 acceptance demonstrates the approved same-project, SHA-guarded, no-overwrite move semantics against the canonical launchd provider. The installer hardening addresses the activation race without changing the public MCP contract or permission model.
 
-**Phase 3 / Safe Move & Rename Core acceptance: PASSED.**
+All approved Phase 3 implementation, regression, live-contract, S5 acceptance, and documentation closeout requirements are satisfied. No Phase 3 task remains active.
+
+**Phase 3 / Safe Move & Rename Core: PASSED / CLOSED.**
