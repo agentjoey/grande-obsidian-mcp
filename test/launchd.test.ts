@@ -4,11 +4,14 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("launchd packaging", () => {
-  it("exposes explicit install and uninstall commands", async () => {
+  it("exposes explicit install, native build, and uninstall commands", async () => {
     const packageJson = JSON.parse(await readFile(resolve("package.json"), "utf8")) as {
       scripts?: Record<string, string>;
     };
 
+    expect(packageJson.scripts?.["native:build"]).toBe(
+      "node --disable-warning=ExperimentalWarning ops/native/buildRenameExcl.ts",
+    );
     expect(packageJson.scripts?.["launchd:install"]).toBe(
       "node --disable-warning=ExperimentalWarning ops/launchd/install.ts",
     );
@@ -53,6 +56,16 @@ describe("launchd packaging", () => {
     expect(plist).not.toContain("<key>GRANDE_OBSIDIAN_TOKEN</key>");
     expect(plist).not.toContain("secret-token-value");
     expect(plist).not.toContain(".grande-work/worktrees");
+  });
+
+  it("builds the canonical rename helper before launchctl bootstrap", async () => {
+    const installer = await readFile(resolve("ops/launchd/install.ts"), "utf8");
+    const buildCall = installer.indexOf("buildRenameExcl(repoRoot)");
+    const bootstrapCall = installer.indexOf('run("/bin/launchctl", ["bootstrap"');
+
+    expect(buildCall).toBeGreaterThanOrEqual(0);
+    expect(bootstrapCall).toBeGreaterThanOrEqual(0);
+    expect(buildCall).toBeLessThan(bootstrapCall);
   });
 
   it("ships a token-file launcher plus install and uninstall entrypoints", async () => {
