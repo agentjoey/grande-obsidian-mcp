@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { buildRenameExcl } from "../ops/native/buildRenameExcl.js";
 import { createProjectService } from "../src/projectService.js";
 
 const roots: string[] = [];
@@ -126,6 +127,30 @@ describe("project service", () => {
     const expectedSha256 = createHash("sha256").update(before).digest("hex");
 
     await expect(service.updateProjectDocument(project, "PRD.md", "😀".repeat(65_537), expectedSha256))
+      .rejects.toMatchObject({ code: "INVALID_INPUT" });
+  });
+
+  it("routes a guarded same-project move through the configured root", async () => {
+    buildRenameExcl(resolve("."));
+    const { projectRootPath, project } = await fixture();
+    const service = createProjectService({ projectRootPath });
+    const source = join(projectRootPath, project, "PRD.md");
+    const content = await readFile(source);
+    const expectedSha256 = createHash("sha256").update(content).digest("hex");
+
+    await expect(service.moveProjectDocument(project, "PRD.md", "design/MOVED.md", expectedSha256)).resolves.toEqual({
+      sourcePath: "PRD.md",
+      targetPath: "design/MOVED.md",
+      sha256: expectedSha256,
+      totalBytes: content.byteLength,
+    });
+    await expect(readFile(join(projectRootPath, project, "design", "MOVED.md"))).resolves.toEqual(content);
+  });
+
+  it("reuses the canonical SHA validator for move requests", async () => {
+    const { projectRootPath, project } = await fixture();
+    const service = createProjectService({ projectRootPath });
+    await expect(service.moveProjectDocument(project, "PRD.md", "design/MOVED.md", "BAD"))
       .rejects.toMatchObject({ code: "INVALID_INPUT" });
   });
 });
