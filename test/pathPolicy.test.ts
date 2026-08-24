@@ -2,7 +2,12 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { resolveCreatableMarkdown, resolveExistingMarkdown, resolveProjectDirectory } from "../src/pathPolicy.js";
+import {
+  resolveCreatableMarkdown,
+  resolveExistingMarkdown,
+  resolveMoveTargetMarkdown,
+  resolveProjectDirectory,
+} from "../src/pathPolicy.js";
 
 const roots: string[] = [];
 
@@ -82,5 +87,36 @@ describe("project path policy", () => {
     for (const path of ["../new.md", ".hidden/new.md", "design/new.txt", "design/linked.md"]) {
       await expect(resolveCreatableMarkdown(projectRoot, project, path)).rejects.toThrow();
     }
+  });
+
+  it("resolves an absent move target only under an existing real parent", async () => {
+    const { projectRoot, project } = await fixture();
+    await expect(resolveMoveTargetMarkdown(projectRoot, project, "design/moved.md"))
+      .resolves.toBe(join(projectRoot, project, "design", "moved.md"));
+    await expect(resolveMoveTargetMarkdown(projectRoot, project, "missing/moved.md"))
+      .rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("rejects an existing move target", async () => {
+    const { projectRoot, project } = await fixture();
+    await expect(resolveMoveTargetMarkdown(projectRoot, project, "design/architecture.md"))
+      .rejects.toMatchObject({ code: "ALREADY_EXISTS" });
+  });
+
+  it.each(["../moved.md", "/tmp/moved.md", ".hidden/moved.md", "design\\moved.md", "design/moved.txt"])(
+    "rejects unsafe move target %s",
+    async (path) => {
+      const { projectRoot, project } = await fixture();
+      await expect(resolveMoveTargetMarkdown(projectRoot, project, path)).rejects.toThrow();
+    },
+  );
+
+  it("rejects a symlink parent for a move target", async () => {
+    const { root, projectRoot, project } = await fixture();
+    const outside = join(root, "outside-move");
+    await mkdir(outside);
+    await symlink(outside, join(projectRoot, project, "linked-target"));
+    await expect(resolveMoveTargetMarkdown(projectRoot, project, "linked-target/new.md"))
+      .rejects.toMatchObject({ code: "PATH_ESCAPE" });
   });
 });

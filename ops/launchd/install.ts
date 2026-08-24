@@ -17,6 +17,7 @@ import {
   renderLaunchAgentPlist,
   resolveCanonicalRepoRoot,
 } from "../../src/launchd.ts";
+import { buildRenameExcl } from "../native/buildRenameExcl.ts";
 
 function fail(message: string): never {
   throw new Error(`[launchd:install] ${message}`);
@@ -74,6 +75,10 @@ const packageJson = JSON.parse(readFileSync(canonicalPackage, "utf8")) as { name
 if (packageJson.name !== "grande-obsidian-mcp") {
   fail(`unexpected canonical package at ${canonicalPackage}`);
 }
+
+// Build the fixed canonical helper before any LaunchAgent plist is installed or bootstrapped.
+// The build utility accepts no compiler/path override and writes only native/bin/rename-excl.
+buildRenameExcl(repoRoot);
 
 mkdirSync(logsDir, { recursive: true });
 mkdirSync(launchAgentsDir, { recursive: true });

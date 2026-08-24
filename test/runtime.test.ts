@@ -1,7 +1,9 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { buildRenameExcl } from "../ops/native/buildRenameExcl.js";
 import { createRuntime, loadRuntimeSettings } from "../src/runtime.js";
 
 const roots: string[] = [];
@@ -40,14 +42,16 @@ describe("runtime settings", () => {
     ).toThrow(/PORT/);
   });
 
-  it("runs all four approved M1 tools end-to-end through MCP against the configured filesystem root", async () => {
+  it("runs the approved tool surface end-to-end through MCP including guarded move", async () => {
+    buildRenameExcl(resolve("."));
     const root = await mkdtemp(join(tmpdir(), "grande-obsidian-runtime-"));
     roots.push(root);
     const vault = join(root, "vault");
     const projectRoot = "10_Projects/Active";
     const project = "P033-GrandeGPT";
+    const sourceContent = "# PRD\nPhase 4 is complete.\n";
     await mkdir(join(vault, projectRoot, project, "design"), { recursive: true });
-    await writeFile(join(vault, projectRoot, project, "PRD.md"), "# PRD\nPhase 4 is complete.\n", "utf8");
+    await writeFile(join(vault, projectRoot, project, "PRD.md"), sourceContent, "utf8");
     await writeFile(join(vault, projectRoot, project, "design", "DESIGN.md"), "# Design\nMCP architecture\n", "utf8");
     await writeFile(join(vault, projectRoot, project, "design", "ignore.txt"), "Phase 4 secret\n", "utf8");
     const configPath = join(root, "config.yaml");
@@ -96,5 +100,17 @@ describe("runtime settings", () => {
     expect(search).toContain("PRD.md");
     expect(search).toContain("Phase 4 is complete.");
     expect(search).not.toContain("Phase 4 secret");
+
+    const expectedSha256 = createHash("sha256").update(sourceContent).digest("hex");
+    const moved = await call("move_project_document", {
+      project,
+      sourcePath: "PRD.md",
+      targetPath: "design/MOVED.md",
+      expectedSha256,
+    });
+    expect(moved).toContain("design/MOVED.md");
+    expect(moved).toContain(expectedSha256);
+    await expect(readFile(join(vault, projectRoot, project, "design", "MOVED.md"), "utf8")).resolves.toBe(sourceContent);
+    await expect(readFile(join(vault, projectRoot, project, "PRD.md"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 });

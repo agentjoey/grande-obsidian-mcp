@@ -1,4 +1,4 @@
-import type { ProjectService } from "./projectService.ts";
+import { SHA256_PATTERN, type ProjectService } from "./projectService.ts";
 
 export type ToolName =
   | "list_projects"
@@ -6,15 +6,17 @@ export type ToolName =
   | "read_project_document"
   | "search_project"
   | "create_project_document"
-  | "update_project_document";
+  | "update_project_document"
+  | "move_project_document";
 
 export interface ToolDef {
   name: ToolName;
   description: string;
   inputSchema: {
     type: "object";
-    properties: Record<string, { type: "string" | "number"; description?: string }>;
+    properties: Record<string, { type: "string" | "number"; description?: string; pattern?: string }>;
     required?: string[];
+    additionalProperties?: false;
   };
   annotations: {
     readOnlyHint: boolean;
@@ -143,7 +145,7 @@ export function buildTools(service: ProjectService): ToolDef[] {
           project: { type: "string", description: PROJECT_ARG_DESCRIPTION },
           path: { type: "string" },
           content: { type: "string" },
-          expectedSha256: { type: "string" },
+          expectedSha256: { type: "string", pattern: SHA256_PATTERN },
         },
         required: ["project", "path", "content", "expectedSha256"],
       },
@@ -153,6 +155,29 @@ export function buildTools(service: ProjectService): ToolDef[] {
           requiredString(args, "project"),
           requiredString(args, "path"),
           requiredText(args, "content"),
+          requiredString(args, "expectedSha256"),
+        ),
+    },
+    {
+      name: "move_project_document",
+      description: "Safely perform a same-project Markdown move or rename without overwriting an existing target; wikilinks are not rewritten.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project: { type: "string", description: PROJECT_ARG_DESCRIPTION },
+          sourcePath: { type: "string" },
+          targetPath: { type: "string" },
+          expectedSha256: { type: "string", pattern: SHA256_PATTERN },
+        },
+        required: ["project", "sourcePath", "targetPath", "expectedSha256"],
+        additionalProperties: false,
+      },
+      annotations: SAFE_WRITE,
+      handler: (args) =>
+        service.moveProjectDocument(
+          requiredString(args, "project"),
+          requiredString(args, "sourcePath"),
+          requiredString(args, "targetPath"),
           requiredString(args, "expectedSha256"),
         ),
     },

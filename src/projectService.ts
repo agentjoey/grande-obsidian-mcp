@@ -3,8 +3,10 @@ import {
   createMarkdown,
   listMarkdownEntries,
   listProjects,
+  moveMarkdown,
   readMarkdown,
   updateMarkdown,
+  type MarkdownMove,
   type MarkdownRead,
   type MarkdownWrite,
   type ProjectSummary,
@@ -36,6 +38,7 @@ export interface ProjectService {
   searchProject(project: string, query: string, maxResults: number): Promise<SearchResult>;
   createProjectDocument(project: string, path: string, content: string): Promise<MarkdownWrite>;
   updateProjectDocument(project: string, path: string, content: string, expectedSha256: string): Promise<MarkdownWrite>;
+  moveProjectDocument(project: string, sourcePath: string, targetPath: string, expectedSha256: string): Promise<MarkdownMove>;
 }
 
 const DEFAULT_MAX_READ_BYTES = 32 * 1024;
@@ -43,7 +46,8 @@ const DEFAULT_MAX_STRUCTURE_ENTRIES = 250;
 const SEARCH_SCAN_ENTRY_LIMIT = 1000;
 const SEARCH_FILE_MAX_BYTES = 256 * 1024;
 const MAX_WRITE_BYTES = 256 * 1024;
-const SHA256_RE = /^[0-9a-f]{64}$/;
+export const SHA256_PATTERN = "^[0-9a-f]{64}$";
+const SHA256_RE = new RegExp(SHA256_PATTERN);
 
 function writeContent(content: string): Buffer {
   const encoded = Buffer.from(content, "utf8");
@@ -122,6 +126,16 @@ export function createProjectService(options: ProjectServiceOptions): ProjectSer
         project,
         path,
         writeContent(content),
+        expectedSha(expectedSha256),
+      );
+    },
+
+    async moveProjectDocument(project, sourcePath, targetPath, expectedSha256) {
+      return moveMarkdown(
+        options.projectRootPath,
+        project,
+        sourcePath,
+        targetPath,
         expectedSha(expectedSha256),
       );
     },
