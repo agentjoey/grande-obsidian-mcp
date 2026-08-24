@@ -12,6 +12,7 @@ const service: ProjectService = {
   createProjectDocument: async (_project, path, content) => ({ path, sha256: "1".repeat(64), totalBytes: Buffer.byteLength(content) }),
   updateProjectDocument: async (_project, path, content) => ({ path, sha256: "2".repeat(64), totalBytes: Buffer.byteLength(content) }),
   moveProjectDocument: async (_project, sourcePath, targetPath) => ({ sourcePath, targetPath, sha256: "3".repeat(64), totalBytes: 6 }),
+  createProjectDirectory: async (_project, path) => ({ path }),
 };
 
 function rpcHeaders(extra: Record<string, string> = {}): Record<string, string> {
@@ -42,7 +43,7 @@ describe("MCP HTTP server", () => {
     expect((await app.request("/mcp", { method: "POST", headers: rpcHeaders({ host: "evil.example" }), body })).status).toBe(403);
   });
 
-  it("serves all seven approved Phase 3 tools through Streamable HTTP MCP", async () => {
+  it("serves all eight approved Phase 4 tools through Streamable HTTP MCP", async () => {
     const app = createApp({ service, token, allowedOrigins: [] });
     const response = await rpc(app, "tools/list", {});
 
@@ -56,6 +57,7 @@ describe("MCP HTTP server", () => {
       "create_project_document",
       "update_project_document",
       "move_project_document",
+      "create_project_directory",
     ]) {
       expect(text).toContain(name);
     }
