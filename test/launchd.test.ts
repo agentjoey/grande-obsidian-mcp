@@ -34,13 +34,15 @@ describe("launchd packaging", () => {
     );
   });
 
-  it("renders a loopback launch agent without embedding the bearer token", async () => {
+  it("renders a loopback launch agent with exact canonical build identity without embedding the bearer token", async () => {
     expect(existsSync(resolve("src/launchd.ts"))).toBe(true);
     const { renderLaunchAgentPlist } = await import("../src/launchd.js");
+    const buildSha = "a".repeat(40);
     const plist = renderLaunchAgentPlist({
       repoRoot: "/Users/xtation/AgentWorks/GPT_Workspace/grande-obsidian-mcp",
       nodePath: "/usr/local/bin/node",
       homeDir: "/Users/xtation",
+      buildSha,
     });
 
     expect(plist).toContain("ai.agentjoey.grande-obsidian-mcp");
@@ -50,12 +52,40 @@ describe("launchd packaging", () => {
     );
     expect(plist).toContain("/Users/xtation/.grande-control/config/obsidian-mcp.yaml");
     expect(plist).toContain("/Users/xtation/.grande-control/secrets/obsidian-token");
+    expect(plist).toContain("<key>GRANDE_OBSIDIAN_BUILD_SHA</key>");
+    expect(plist).toContain(`<string>${buildSha}</string>`);
     expect(plist).toContain("<string>8788</string>");
     expect(plist).toContain("<key>RunAtLoad</key>");
     expect(plist).toContain("<key>KeepAlive</key>");
     expect(plist).not.toContain("<key>GRANDE_OBSIDIAN_TOKEN</key>");
     expect(plist).not.toContain("secret-token-value");
     expect(plist).not.toContain(".grande-work/worktrees");
+  });
+
+  it("rejects malformed production build identity before rendering launchd", async () => {
+    const { renderLaunchAgentPlist } = await import("../src/launchd.js");
+    expect(() => renderLaunchAgentPlist({
+      repoRoot: "/workspace/grande-obsidian-mcp",
+      nodePath: "/usr/local/bin/node",
+      homeDir: "/Users/xtation",
+      buildSha: "bad",
+    })).toThrow(/build SHA/i);
+  });
+
+  it("captures clean canonical tracked state and exact HEAD before native build and bootstrap", async () => {
+    const installer = await readFile(resolve("ops/launchd/install.ts"), "utf8");
+    const statusCall = installer.indexOf('"status", "--porcelain", "--untracked-files=no"');
+    const shaCall = installer.indexOf('"rev-parse", "HEAD"');
+    const buildCall = installer.indexOf("buildRenameExcl(repoRoot)");
+    const bootstrapCall = installer.indexOf('run("/bin/launchctl", ["bootstrap"');
+
+    expect(statusCall).toBeGreaterThanOrEqual(0);
+    expect(shaCall).toBeGreaterThan(statusCall);
+    expect(installer).toContain("canonical tracked tree is not clean");
+    expect(buildCall).toBeGreaterThan(shaCall);
+    expect(bootstrapCall).toBeGreaterThan(buildCall);
+    expect(installer).toContain("assertProductionBuildSha");
+    expect(installer).toContain("buildSha,");
   });
 
   it("builds the canonical rename helper before launchctl bootstrap", async () => {

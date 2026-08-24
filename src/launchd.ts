@@ -8,6 +8,7 @@ export interface LaunchAgentOptions {
   repoRoot: string;
   nodePath: string;
   homeDir: string;
+  buildSha: string;
 }
 
 export function resolveCanonicalRepoRoot(repoRoot: string): string {
@@ -22,6 +23,13 @@ export function resolveCanonicalRepoRoot(repoRoot: string): string {
   return join(workspaceRoot, REPO_ID);
 }
 
+export function assertProductionBuildSha(value: string): string {
+  if (!/^[0-9a-f]{40}$/.test(value)) {
+    throw new Error("production build SHA must be a lowercase 40-character Git SHA");
+  }
+  return value;
+}
+
 function xml(value: string): string {
   return value
     .replaceAll("&", "&amp;")
@@ -33,6 +41,7 @@ function xml(value: string): string {
 
 export function renderLaunchAgentPlist(options: LaunchAgentOptions): string {
   const repoRoot = resolveCanonicalRepoRoot(options.repoRoot);
+  const buildSha = assertProductionBuildSha(options.buildSha);
   const runnerPath = join(repoRoot, "ops", "launchd", "run.ts");
   const configPath = join(options.homeDir, ".grande-control", "config", "obsidian-mcp.yaml");
   const tokenFile = join(options.homeDir, ".grande-control", "secrets", "obsidian-token");
@@ -59,6 +68,8 @@ export function renderLaunchAgentPlist(options: LaunchAgentOptions): string {
     <string>${xml(configPath)}</string>
     <key>GRANDE_OBSIDIAN_TOKEN_FILE</key>
     <string>${xml(tokenFile)}</string>
+    <key>GRANDE_OBSIDIAN_BUILD_SHA</key>
+    <string>${xml(buildSha)}</string>
     <key>PORT</key>
     <string>${LAUNCHD_PORT}</string>
   </dict>

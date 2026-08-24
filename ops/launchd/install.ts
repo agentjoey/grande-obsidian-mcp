@@ -13,6 +13,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  assertProductionBuildSha,
   LAUNCHD_LABEL,
   LAUNCHD_PORT,
   renderLaunchAgentPlist,
@@ -124,6 +125,14 @@ if (packageJson.name !== "grande-obsidian-mcp") {
   fail(`unexpected canonical package at ${canonicalPackage}`);
 }
 
+const trackedStatus = run("/usr/bin/git", ["-C", repoRoot, "status", "--porcelain", "--untracked-files=no"]).stdout.trim();
+if (trackedStatus) {
+  fail("canonical tracked tree is not clean");
+}
+const buildSha = assertProductionBuildSha(
+  run("/usr/bin/git", ["-C", repoRoot, "rev-parse", "HEAD"]).stdout.trim(),
+);
+
 // Build the fixed canonical helper before any LaunchAgent plist is installed or bootstrapped.
 // The build utility accepts no compiler/path override and writes only native/bin/rename-excl.
 buildRenameExcl(repoRoot);
@@ -135,6 +144,7 @@ const plist = renderLaunchAgentPlist({
   repoRoot,
   nodePath: process.execPath,
   homeDir,
+  buildSha,
 });
 const tempPlistPath = join(launchAgentsDir, `.${LAUNCHD_LABEL}.${randomUUID()}.plist`);
 writeFileSync(tempPlistPath, plist, { encoding: "utf8", mode: 0o644, flag: "wx" });
@@ -165,6 +175,7 @@ try {
   console.log(`[launchd:install] installed ${LAUNCHD_LABEL}`);
   console.log(`[launchd:install] repo=${repoRoot}`);
   console.log(`[launchd:install] plist=${plistPath}`);
+  console.log(`[launchd:install] buildSha=${buildSha}`);
 } finally {
   if (existsSync(tempPlistPath)) unlinkSync(tempPlistPath);
 }
