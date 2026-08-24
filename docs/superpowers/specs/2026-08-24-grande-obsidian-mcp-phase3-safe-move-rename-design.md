@@ -1,8 +1,8 @@
 # grande-obsidian-mcp Phase 3 / Safe Move & Rename Core Design
 
 **Date:** 2026-08-24  
-**Status:** Approved by Human Owner; implementation not started  
-**Phase:** Phase 3 / Safe Move & Rename Core  
+**Status:** Completed; implementation, real S5 acceptance, and formal closeout completed 2026-08-24  
+**Phase:** Phase 3 / Safe Move & Rename Core — completed  
 **Repository:** `grande-obsidian-mcp`
 
 ## 1. Purpose
