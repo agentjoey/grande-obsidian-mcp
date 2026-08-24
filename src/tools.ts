@@ -6,7 +6,8 @@ export type ToolName =
   | "read_project_document"
   | "search_project"
   | "create_project_document"
-  | "update_project_document";
+  | "update_project_document"
+  | "move_project_document";
 
 export interface ToolDef {
   name: ToolName;
@@ -153,6 +154,28 @@ export function buildTools(service: ProjectService): ToolDef[] {
           requiredString(args, "project"),
           requiredString(args, "path"),
           requiredText(args, "content"),
+          requiredString(args, "expectedSha256"),
+        ),
+    },
+    {
+      name: "move_project_document",
+      description: "Safely perform a same-project Markdown move or rename without overwriting an existing target; wikilinks are not rewritten.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project: { type: "string", description: PROJECT_ARG_DESCRIPTION },
+          sourcePath: { type: "string" },
+          targetPath: { type: "string" },
+          expectedSha256: { type: "string" },
+        },
+        required: ["project", "sourcePath", "targetPath", "expectedSha256"],
+      },
+      annotations: SAFE_WRITE,
+      handler: (args) =>
+        service.moveProjectDocument(
+          requiredString(args, "project"),
+          requiredString(args, "sourcePath"),
+          requiredString(args, "targetPath"),
           requiredString(args, "expectedSha256"),
         ),
     },

@@ -42,7 +42,7 @@ describe("MCP HTTP server", () => {
     expect((await app.request("/mcp", { method: "POST", headers: rpcHeaders({ host: "evil.example" }), body })).status).toBe(403);
   });
 
-  it("serves all six approved Phase 2 tools through Streamable HTTP MCP", async () => {
+  it("serves all seven approved Phase 3 tools through Streamable HTTP MCP", async () => {
     const app = createApp({ service, token, allowedOrigins: [] });
     const response = await rpc(app, "tools/list", {});
 
@@ -55,6 +55,7 @@ describe("MCP HTTP server", () => {
       "search_project",
       "create_project_document",
       "update_project_document",
+      "move_project_document",
     ]) {
       expect(text).toContain(name);
     }

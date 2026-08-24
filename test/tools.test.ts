@@ -9,22 +9,23 @@ const service: ProjectService = {
   searchProject: async () => ({ results: [], truncated: false }),
   createProjectDocument: async (_project, path, content) => ({ path, sha256: "1".repeat(64), totalBytes: Buffer.byteLength(content) }),
   updateProjectDocument: async (_project, path, content) => ({ path, sha256: "2".repeat(64), totalBytes: Buffer.byteLength(content) }),
-  moveProjectDocument: async (_project, sourcePath, targetPath) => ({ sourcePath, targetPath, sha256: "3".repeat(64), totalBytes: 0 }),
+  moveProjectDocument: async (_project, sourcePath, targetPath) => ({ sourcePath, targetPath, sha256: "3".repeat(64), totalBytes: 9 }),
 };
 
 describe("MCP tool manifest", () => {
-  it("exposes exactly the approved six Phase 2 tools with exact annotations", () => {
+  it("exposes exactly the approved seven Phase 3 tools with exact annotations", () => {
     const tools = buildTools(service);
     expect(tools.map((tool) => tool.name).sort()).toEqual([
       "create_project_document",
       "get_project_structure",
       "list_projects",
+      "move_project_document",
       "read_project_document",
       "search_project",
       "update_project_document",
     ]);
 
-    for (const name of ["create_project_document", "update_project_document"] as const) {
+    for (const name of ["create_project_document", "update_project_document", "move_project_document"] as const) {
       const write = tools.find((tool) => tool.name === name);
       expect(write?.annotations).toEqual({
         readOnlyHint: false,
@@ -33,7 +34,7 @@ describe("MCP tool manifest", () => {
       });
     }
 
-    for (const tool of tools.filter((candidate) => !["create_project_document", "update_project_document"].includes(candidate.name))) {
+    for (const tool of tools.filter((candidate) => !["create_project_document", "update_project_document", "move_project_document"].includes(candidate.name))) {
       expect(tool.annotations).toEqual({
         readOnlyHint: true,
         destructiveHint: false,
@@ -48,6 +49,7 @@ describe("MCP tool manifest", () => {
     expect(projectTools.map((tool) => tool.name).sort()).toEqual([
       "create_project_document",
       "get_project_structure",
+      "move_project_document",
       "read_project_document",
       "search_project",
       "update_project_document",
@@ -94,15 +96,34 @@ describe("MCP tool manifest", () => {
       "path",
       "project",
     ]);
-    await expect(update!.handler({
+  });
+
+  it("exposes move with exactly four approved inputs and no bypass knobs", async () => {
+    const tools = buildTools(service);
+    const move = tools.find((tool) => tool.name === "move_project_document");
+    expect(move).toBeDefined();
+    expect(move?.inputSchema.required).toEqual(["project", "sourcePath", "targetPath", "expectedSha256"]);
+    expect(Object.keys(move?.inputSchema.properties ?? {}).sort()).toEqual([
+      "expectedSha256",
+      "project",
+      "sourcePath",
+      "targetPath",
+    ]);
+    for (const forbidden of ["force", "overwrite", "updateLinks", "createParents", "sourceProject", "targetProject"]) {
+      expect(move?.inputSchema.properties).not.toHaveProperty(forbidden);
+    }
+    expect(move?.description).toMatch(/same-project/i);
+    expect(move?.description).toMatch(/without overwriting/i);
+    await expect(move!.handler({
       project: "P033-GrandeGPT",
-      path: "PRD.md",
-      content: "updated",
+      sourcePath: "PRD.md",
+      targetPath: "Archive/PRD.md",
       expectedSha256: "0".repeat(64),
     })).resolves.toEqual({
-      path: "PRD.md",
-      sha256: "2".repeat(64),
-      totalBytes: 7,
+      sourcePath: "PRD.md",
+      targetPath: "Archive/PRD.md",
+      sha256: "3".repeat(64),
+      totalBytes: 9,
     });
   });
 });
