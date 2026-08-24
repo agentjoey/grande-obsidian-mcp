@@ -42,7 +42,7 @@ describe("runtime settings", () => {
     ).toThrow(/PORT/);
   });
 
-  it("runs the approved tool surface end-to-end through MCP including guarded move", async () => {
+  it("runs the approved Phase 4 tool surface end-to-end through MCP", async () => {
     buildRenameExcl(resolve("."));
     const root = await mkdtemp(join(tmpdir(), "grande-obsidian-runtime-"));
     roots.push(root);
@@ -50,6 +50,7 @@ describe("runtime settings", () => {
     const projectRoot = "10_Projects/Active";
     const project = "P033-GrandeGPT";
     const sourceContent = "# PRD\nPhase 4 is complete.\n";
+    const createdContent = "# Created\nphase 4 directory composition\n";
     await mkdir(join(vault, projectRoot, project, "design"), { recursive: true });
     await writeFile(join(vault, projectRoot, project, "PRD.md"), sourceContent, "utf8");
     await writeFile(join(vault, projectRoot, project, "design", "DESIGN.md"), "# Design\nMCP architecture\n", "utf8");
@@ -87,10 +88,10 @@ describe("runtime settings", () => {
 
     expect(await call("list_projects", {})).toContain(project);
 
-    const structure = await call("get_project_structure", { project });
-    expect(structure).toContain("PRD.md");
-    expect(structure).toContain("design/DESIGN.md");
-    expect(structure).not.toContain("ignore.txt");
+    const initialStructure = await call("get_project_structure", { project });
+    expect(initialStructure).toContain("PRD.md");
+    expect(initialStructure).toContain("design/DESIGN.md");
+    expect(initialStructure).not.toContain("ignore.txt");
 
     const read = await call("read_project_document", { project, path: "PRD.md" });
     expect(read).toContain("Phase 4 is complete.");
@@ -101,16 +102,35 @@ describe("runtime settings", () => {
     expect(search).toContain("Phase 4 is complete.");
     expect(search).not.toContain("Phase 4 secret");
 
+    const directory = await call("create_project_directory", { project, path: "archive" });
+    expect(directory).toContain("archive");
+
+    const created = await call("create_project_document", {
+      project,
+      path: "archive/CREATED.md",
+      content: createdContent,
+    });
+    expect(created).toContain("archive/CREATED.md");
+    await expect(readFile(join(vault, projectRoot, project, "archive", "CREATED.md"), "utf8"))
+      .resolves.toBe(createdContent);
+
     const expectedSha256 = createHash("sha256").update(sourceContent).digest("hex");
     const moved = await call("move_project_document", {
       project,
       sourcePath: "PRD.md",
-      targetPath: "design/MOVED.md",
+      targetPath: "archive/MOVED.md",
       expectedSha256,
     });
-    expect(moved).toContain("design/MOVED.md");
+    expect(moved).toContain("archive/MOVED.md");
     expect(moved).toContain(expectedSha256);
-    await expect(readFile(join(vault, projectRoot, project, "design", "MOVED.md"), "utf8")).resolves.toBe(sourceContent);
-    await expect(readFile(join(vault, projectRoot, project, "PRD.md"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(join(vault, projectRoot, project, "archive", "MOVED.md"), "utf8"))
+      .resolves.toBe(sourceContent);
+    await expect(readFile(join(vault, projectRoot, project, "PRD.md"), "utf8"))
+      .rejects.toMatchObject({ code: "ENOENT" });
+
+    const finalStructure = await call("get_project_structure", { project });
+    expect(finalStructure).toContain("archive");
+    expect(finalStructure).toContain("archive/CREATED.md");
+    expect(finalStructure).toContain("archive/MOVED.md");
   });
 });
