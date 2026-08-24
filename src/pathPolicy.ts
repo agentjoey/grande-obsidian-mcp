@@ -51,6 +51,20 @@ function documentSegments(path: string): string[] {
   return segments;
 }
 
+function directorySegments(path: string): string[] {
+  if (path.length === 0 || isAbsolute(path) || path.includes("\\")) {
+    throw new PathPolicyError("INVALID_INPUT", "directory path must be a non-empty '/'-separated relative path");
+  }
+  assertDisplaySafe(path, "directory path");
+  const segments = path.split("/");
+  for (const segment of segments) {
+    if (segment.length === 0 || segment === "." || segment === ".." || segment.startsWith(".")) {
+      throw new PathPolicyError("INVALID_INPUT", "directory path contains a forbidden component");
+    }
+  }
+  return segments;
+}
+
 async function assertRealDirectory(path: string, label: string): Promise<void> {
   let stat;
   try {
@@ -161,4 +175,38 @@ export async function resolveMoveTargetMarkdown(
   documentPath: string,
 ): Promise<string> {
   return resolveAbsentMarkdownTarget(projectRootPath, project, documentPath, "move");
+}
+
+export async function resolveCreatableDirectory(
+  projectRootPath: string,
+  project: string,
+  directoryPath: string,
+): Promise<string> {
+  const projectPath = await resolveProjectDirectory(projectRootPath, project);
+  const segments = directorySegments(directoryPath);
+  let current = projectPath;
+
+  for (let index = 0; index < segments.length; index += 1) {
+    current = join(current, segments[index]!);
+    assertContained(projectPath, current);
+    const isLast = index === segments.length - 1;
+
+    if (!isLast) {
+      await assertRealDirectory(current, "directory parent component");
+      continue;
+    }
+
+    try {
+      const stat = await lstat(current);
+      if (stat.isSymbolicLink()) {
+        throw new PathPolicyError("PATH_ESCAPE", "directory target must not be a symbolic link");
+      }
+      throw new PathPolicyError("ALREADY_EXISTS", "directory target already exists");
+    } catch (error) {
+      if (isNodeError(error, "ENOENT")) return current;
+      throw error;
+    }
+  }
+
+  throw new PathPolicyError("INVALID_INPUT", "directory path must not be empty");
 }
