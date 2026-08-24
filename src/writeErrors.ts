@@ -1,3 +1,4 @@
+import { ExclusiveRenameError } from "./exclusiveRename.ts";
 import { PathPolicyError } from "./pathPolicy.ts";
 
 export type WriteErrorCode =
@@ -39,15 +40,29 @@ export function toWriteDomainError(
       case "PATH_ESCAPE":
         return new WriteDomainError("POLICY_DENIED", "write path is denied by project policy");
       case "ALREADY_EXISTS":
-        return new WriteDomainError("FILE_EXISTS", "create target already exists");
+        return new WriteDomainError("FILE_EXISTS", "write target already exists");
       default:
         return new WriteDomainError("POLICY_DENIED", "write path is denied by project policy");
     }
   }
 
+  if (error instanceof ExclusiveRenameError) {
+    switch (error.failure) {
+      case "EEXIST":
+        return new WriteDomainError("FILE_EXISTS", "write target already exists");
+      case "ENOENT":
+        return new WriteDomainError("FILE_NOT_FOUND", "required project, parent, or document was not found");
+      case "ELOOP":
+      case "ENOTCAPABLE":
+        return new WriteDomainError("POLICY_DENIED", "write path is denied by project policy");
+      default:
+        return new WriteDomainError("WRITE_FAILED", "document write failed");
+    }
+  }
+
   switch (nodeErrorCode(error)) {
     case "EEXIST":
-      return new WriteDomainError("FILE_EXISTS", "create target already exists");
+      return new WriteDomainError("FILE_EXISTS", "write target already exists");
     case "ENOENT":
       return new WriteDomainError("FILE_NOT_FOUND", "required project, parent, or document was not found");
     default:

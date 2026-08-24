@@ -112,10 +112,11 @@ export async function resolveExistingMarkdown(
   return current;
 }
 
-export async function resolveCreatableMarkdown(
+async function resolveAbsentMarkdownTarget(
   projectRootPath: string,
   project: string,
   documentPath: string,
+  targetLabel: "create" | "move",
 ): Promise<string> {
   const projectPath = await resolveProjectDirectory(projectRootPath, project);
   const segments = documentSegments(documentPath);
@@ -134,9 +135,9 @@ export async function resolveCreatableMarkdown(
     try {
       const stat = await lstat(current);
       if (stat.isSymbolicLink()) {
-        throw new PathPolicyError("PATH_ESCAPE", "create target must not be a symbolic link");
+        throw new PathPolicyError("PATH_ESCAPE", `${targetLabel} target must not be a symbolic link`);
       }
-      throw new PathPolicyError("ALREADY_EXISTS", "create target already exists");
+      throw new PathPolicyError("ALREADY_EXISTS", `${targetLabel} target already exists`);
     } catch (error) {
       if (isNodeError(error, "ENOENT")) return current;
       throw error;
@@ -144,4 +145,20 @@ export async function resolveCreatableMarkdown(
   }
 
   throw new PathPolicyError("INVALID_INPUT", "document path must not be empty");
+}
+
+export async function resolveCreatableMarkdown(
+  projectRootPath: string,
+  project: string,
+  documentPath: string,
+): Promise<string> {
+  return resolveAbsentMarkdownTarget(projectRootPath, project, documentPath, "create");
+}
+
+export async function resolveMoveTargetMarkdown(
+  projectRootPath: string,
+  project: string,
+  documentPath: string,
+): Promise<string> {
+  return resolveAbsentMarkdownTarget(projectRootPath, project, documentPath, "move");
 }
