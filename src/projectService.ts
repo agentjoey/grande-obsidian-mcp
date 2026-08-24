@@ -46,7 +46,8 @@ const DEFAULT_MAX_STRUCTURE_ENTRIES = 250;
 const SEARCH_SCAN_ENTRY_LIMIT = 1000;
 const SEARCH_FILE_MAX_BYTES = 256 * 1024;
 const MAX_WRITE_BYTES = 256 * 1024;
-const SHA256_RE = /^[0-9a-f]{64}$/;
+export const SHA256_PATTERN = "^[0-9a-f]{64}$";
+const SHA256_RE = new RegExp(SHA256_PATTERN);
 
 function writeContent(content: string): Buffer {
   const encoded = Buffer.from(content, "utf8");

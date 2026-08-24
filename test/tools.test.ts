@@ -12,6 +12,8 @@ const service: ProjectService = {
   moveProjectDocument: async (_project, sourcePath, targetPath) => ({ sourcePath, targetPath, sha256: "3".repeat(64), totalBytes: 9 }),
 };
 
+const SHA256_PATTERN = "^[0-9a-f]{64}$";
+
 describe("MCP tool manifest", () => {
   it("exposes exactly the approved seven Phase 3 tools with exact annotations", () => {
     const tools = buildTools(service);
@@ -96,6 +98,7 @@ describe("MCP tool manifest", () => {
       "path",
       "project",
     ]);
+    expect((update?.inputSchema.properties.expectedSha256 as unknown as { pattern?: string }).pattern).toBe(SHA256_PATTERN);
   });
 
   it("exposes move with exactly four approved inputs and no bypass knobs", async () => {
@@ -110,6 +113,7 @@ describe("MCP tool manifest", () => {
       "targetPath",
     ]);
     expect((move?.inputSchema as unknown as { additionalProperties?: boolean }).additionalProperties).toBe(false);
+    expect((move?.inputSchema.properties.expectedSha256 as unknown as { pattern?: string }).pattern).toBe(SHA256_PATTERN);
     for (const forbidden of ["force", "overwrite", "updateLinks", "createParents", "sourceProject", "targetProject"]) {
       expect(move?.inputSchema.properties).not.toHaveProperty(forbidden);
     }

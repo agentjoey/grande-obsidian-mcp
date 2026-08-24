@@ -1,4 +1,4 @@
-import type { ProjectService } from "./projectService.ts";
+import { SHA256_PATTERN, type ProjectService } from "./projectService.ts";
 
 export type ToolName =
   | "list_projects"
@@ -14,7 +14,7 @@ export interface ToolDef {
   description: string;
   inputSchema: {
     type: "object";
-    properties: Record<string, { type: "string" | "number"; description?: string }>;
+    properties: Record<string, { type: "string" | "number"; description?: string; pattern?: string }>;
     required?: string[];
     additionalProperties?: false;
   };
@@ -145,7 +145,7 @@ export function buildTools(service: ProjectService): ToolDef[] {
           project: { type: "string", description: PROJECT_ARG_DESCRIPTION },
           path: { type: "string" },
           content: { type: "string" },
-          expectedSha256: { type: "string" },
+          expectedSha256: { type: "string", pattern: SHA256_PATTERN },
         },
         required: ["project", "path", "content", "expectedSha256"],
       },
@@ -167,7 +167,7 @@ export function buildTools(service: ProjectService): ToolDef[] {
           project: { type: "string", description: PROJECT_ARG_DESCRIPTION },
           sourcePath: { type: "string" },
           targetPath: { type: "string" },
-          expectedSha256: { type: "string" },
+          expectedSha256: { type: "string", pattern: SHA256_PATTERN },
         },
         required: ["project", "sourcePath", "targetPath", "expectedSha256"],
         additionalProperties: false,
