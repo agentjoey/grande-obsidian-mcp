@@ -1,7 +1,7 @@
 # grande-obsidian-mcp Phase 4 / Safe Directory Core Design
 
 **Date:** 2026-08-24  
-**Status:** Approved by Human Owner; specification baseline for implementation planning  
+**Status:** Completed; live S5 acceptance passed on canonical `main` at `ab22c394131d6dae3e021d6c24813d7d2dd7c36d`  
 **Phase:** Phase 4 / Safe Directory Core  
 **Repository:** `grande-obsidian-mcp`  
 **Base:** Phase 3 formally closed on canonical `main` at `6c9cad4cbf1e10326bf452ec959bf4b93e3e1519`
@@ -39,31 +39,22 @@ Responsibility remains unchanged:
 
 Phase 4 does not add a new subsystem, database, cache, background worker, native helper, Obsidian CLI adapter, or plugin API integration.
 
-## 3. Roadmap state and public capability surface
+## 3. Public tool surface
 
-### Phase 1 / Read Core — completed
+The final public MCP surface is exactly eight tools:
 
 1. `list_projects`
 2. `get_project_structure`
 3. `read_project_document`
 4. `search_project`
-
-### Phase 2 / Safe Write Core — completed
-
 5. `create_project_document`
 6. `update_project_document`
-
-### Phase 3 / Safe Move & Rename Core — completed
-
 7. `move_project_document`
-
-### Phase 4 / Safe Directory Core — current design
-
 8. `create_project_directory`
 
-At Phase 4 completion the public manifest must contain **exactly eight tools**.
+No existing tool schema changes.
 
-| Tool | Risk | readOnlyHint | destructiveHint | openWorldHint |
+| Tool | Risk | `readOnlyHint` | `destructiveHint` | `openWorldHint` |
 | --- | --- | --- | --- | --- |
 | `list_projects` | read | `true` | `false` | `false` |
 | `get_project_structure` | read | `true` | `false` | `false` |
@@ -74,411 +65,479 @@ At Phase 4 completion the public manifest must contain **exactly eight tools**.
 | `move_project_document` | write | `false` | `false` | `false` |
 | `create_project_directory` | write | `false` | `false` | `false` |
 
-Directory creation is intentionally a normal safe write. It creates one absent target and cannot delete, replace, rename, or overwrite an existing filesystem entry.
-
 ## 4. `create_project_directory` public contract
 
-### 4.1 Required input
-
-The input object contains exactly two required fields:
-
-- `project`: exact visible direct-child project directory returned by `list_projects.directory`, for example `P033-GrandeGPT`; `list_projects.id` such as `P033` is not an alias.
-- `path`: project-relative directory path whose final directory does not yet exist.
-
-Example:
+### Input
 
 ```json
 {
   "project": "P033-GrandeGPT",
-  "path": "Research/2026"
+  "path": "Research/Archive"
 }
 ```
 
-The schema must reject additional properties. There is no `recursive`, `parents`, `force`, `overwrite`, `mode`, `sourceProject`, `targetProject`, or equivalent expansion/bypass field.
+Schema:
 
-### 4.2 Successful result
+```text
+project: string, required
+path: string, required
+additionalProperties: false
+```
 
-A successful result is intentionally minimal:
+No optional fields exist.
+
+`project` has the same meaning as every existing project-scoped tool: the exact visible direct-child directory returned as `list_projects.directory`, not `list_projects.id` and not an arbitrary path.
+
+`path` is a project-relative directory path using `/` separators.
+
+### Success result
 
 ```json
 {
-  "path": "Research/2026"
+  "path": "Research/Archive"
 }
 ```
 
-The returned path is the normalized public logical path supplied by the caller under the approved path syntax. No absolute host path, inode, temporary path, mode, task id, or provider-internal detail is exposed.
+No absolute path, inode, filesystem mode, timestamp, or implementation detail is returned.
 
-### 4.3 Success invariants
+### Annotation and risk classification
 
-Success may be reported only when all of the following are true after the mutation:
+`create_project_directory` is a safe write:
 
-- the project remains a real direct-child directory beneath the configured project root;
-- every parent component of `path` remains an existing real directory;
-- the final target exists;
-- the final target is a real directory;
-- the final target is not a symbolic link;
-- the final target remains beneath the exact project;
-- no pre-existing filesystem entry was overwritten, replaced, moved, or deleted;
-- no missing parent directory was implicitly created.
+```text
+risk = write
+readOnlyHint = false
+destructiveHint = false
+openWorldHint = false
+```
+
+It creates one absent directory leaf and never overwrites or deletes an existing object.
 
 ## 5. Directory path policy
 
-Phase 4 introduces a directory-path validator/resolver parallel to the existing Markdown-path policy. It must reuse the same display-safety and containment principles rather than invent a looser syntax.
+Phase 4 adds a directory-specific resolver rather than broadening the Markdown document resolver into an arbitrary filesystem resolver.
 
-A valid directory path is:
+The accepted logical path must satisfy all of the following:
 
 - non-empty;
-- relative to the selected project;
+- relative, never absolute;
 - `/`-separated;
-- composed only of non-empty visible path components;
-- free of `.` and `..` components;
-- free of hidden components beginning with `.`;
-- free of backslash path syntax;
-- free of the control/spoofing characters already denied by `pathPolicy`;
-- contained beneath the resolved project directory.
+- no `\\` separators;
+- no empty segments;
+- no `.` or `..` segments;
+- no hidden component beginning with `.`;
+- no control characters;
+- no bidi/spoofing characters already forbidden by current display-safety policy;
+- resolved project remains a real direct-child directory beneath the configured project root;
+- every existing directory component is a real non-symlink directory;
+- the final target does not already exist as any filesystem object.
 
-Unlike Markdown document paths, a directory path has no `.md` suffix requirement.
+Unlike Markdown document paths, the final directory name has no `.md` requirement. A directory literally named `archive.md` is therefore valid if the other rules hold.
 
-The project argument keeps the existing contract and validation rules. No project-id alias layer is introduced.
+The resolver is conceptually:
 
-### 5.1 Existing-parent rule
-
-Only the final leaf directory may be absent.
-
-For:
-
-```text
-Research/2026
+```ts
+resolveCreatableDirectory(
+  projectRootPath: string,
+  project: string,
+  directoryPath: string,
+): Promise<string>
 ```
 
-`Research` must already exist as a real directory. If it does not exist, return `FILE_NOT_FOUND` and create nothing.
+It returns an absolute target path internally only after proving the project and parent chain satisfy policy. The absolute path never crosses the public MCP boundary.
+
+## 6. Non-recursive creation semantics
+
+Phase 4 creates exactly one directory leaf.
+
+Given:
+
+```text
+project/
+  Research/
+```
+
+this may succeed:
+
+```text
+create_project_directory(path="Research/Archive")
+```
+
+because `Research` already exists as a real directory.
+
+This must fail:
+
+```text
+create_project_directory(path="Missing/Archive")
+```
+
+if `Missing` does not already exist.
 
 Phase 4 must never behave like `mkdir -p` and must never call `mkdir(..., { recursive: true })`.
 
-### 5.2 Root-level creation
+The provider must not create partial parent paths on failure.
 
-Creating one directory directly under the selected project is allowed:
+This rule also preserves existing document semantics: `create_project_document` and `move_project_document` continue to require their target parent directories to already exist. Phase 4 does not silently teach those existing tools to create parents.
 
-```text
-Research
-```
+## 7. Existing-target and no-overwrite semantics
 
-The selected project itself is the existing parent in that case.
+If the final directory target already exists, creation fails regardless of the target type:
 
-### 5.3 Existing target
-
-If the final target already exists as any filesystem entry, the operation fails.
-
-- existing real directory -> `FILE_EXISTS`;
+- existing directory -> `FILE_EXISTS`;
 - existing regular file -> `FILE_EXISTS`;
-- existing symbolic link -> `POLICY_DENIED` rather than treating the symlink as a harmless collision.
+- existing symlink -> `POLICY_DENIED`;
+- any other filesystem object -> fail closed through the existing write-error model.
 
-The symlink distinction preserves the provider's existing fail-closed path policy.
+Phase 4 exposes no `force`, `overwrite`, `replace`, `merge`, `parents`, or `recursive` input.
 
-## 6. Mutation primitive and race semantics
+Ordinary non-recursive OS `mkdir(target)` provides exclusive creation of the final leaf: if another actor creates the target between validation and mutation, the losing call receives `EEXIST` and must return `FILE_EXISTS` instead of treating the existing object as success.
 
-Phase 4 uses the platform's ordinary non-recursive `mkdir(targetPath)` primitive.
+## 8. Symlink and containment policy
 
-No native helper is needed because ordinary `mkdir` already provides the required target-exclusive mutation property: it fails when the destination already exists rather than replacing it.
+Directory creation inherits the existing fail-closed project policy:
 
-The operation sequence is:
+- configured project root must be a real directory;
+- selected project must be a real direct-child directory;
+- project symlinks are rejected;
+- symlink components inside the requested parent chain are rejected;
+- target symlinks are rejected;
+- lexical traversal is rejected before mutation;
+- no cross-project mutation exists.
+
+The implementation must not use `realpath()` as a way to legitimize a symlink path. A symlink is a policy violation, not an alternate route to a valid location.
+
+## 9. Mutation-time revalidation
+
+Initial path validation is not sufficient because the filesystem can change between validation and `mkdir`.
+
+The mutation sequence is:
+
+1. resolve and validate the project and requested directory target;
+2. record the intended absolute target;
+3. immediately before mutation, re-run the directory target resolver;
+4. require the revalidated target to equal the initially validated absolute target;
+5. perform one non-recursive `mkdir(target)`;
+6. translate OS errors through the existing write-domain mapper;
+7. post-verify the created directory before reporting success.
+
+If a parent becomes a symlink or otherwise violates policy during revalidation, the operation fails before `mkdir` and performs no fallback write elsewhere.
+
+This is deliberately the same conservative pattern already used by Safe Create and Safe Move: validate, revalidate at the mutation boundary, mutate once, verify.
+
+Phase 4 does not add locks, journals, leases, or a new native helper. The residual race between the final user-space revalidation and the OS `mkdir` is bounded by the kernel's exclusive single-leaf create semantics and post-verification. Unlike rename, `mkdir` already supplies the no-overwrite primitive required here.
+
+## 10. Post-create verification
+
+A successful `mkdir` syscall is not by itself enough to return MCP success.
+
+After creation, the provider must prove:
+
+- the selected project still resolves under policy;
+- each component in the logical directory path is still a real non-symlink directory;
+- the final absolute path equals the intended validated target;
+- the final object is a directory and not a symlink.
+
+If verification cannot prove this state, return `VERIFY_FAILED`.
+
+Phase 4 must not attempt destructive rollback on a verification failure. Removing the new path could delete or affect an object that another actor replaced or populated after `mkdir`. The correct fail-closed behavior is to report that success cannot be proven and leave filesystem state untouched.
+
+## 11. Error model
+
+No new public error code is added.
+
+The existing write-domain codes are sufficient:
 
 ```text
-resolve project
-  -> validate every existing parent
-  -> validate target absent
-  -> immediately re-resolve/revalidate project + parent chain + target
-  -> mkdir(finalTarget) without recursive mode
-  -> post-create re-resolve/revalidate final state
-  -> success
+INVALID_INPUT
+FILE_NOT_FOUND
+FILE_EXISTS
+POLICY_DENIED
+WRITE_FAILED
+VERIFY_FAILED
 ```
-
-The preflight target-absent check is not the no-overwrite guarantee by itself. The actual `mkdir` result remains authoritative under a concurrent target creator. If another actor creates the target between validation and mutation, `mkdir` must fail with `EEXIST`, which maps to `FILE_EXISTS` or `POLICY_DENIED` if post-failure inspection proves the target is a symlink.
-
-The implementation must not retry by choosing a different name and must not convert `EEXIST` into success.
-
-## 7. Mutation-time revalidation
-
-The existing provider design treats early path validation as insufficient for a write. Phase 4 keeps that rule.
-
-Immediately before `mkdir`, the provider must revalidate:
-
-- configured project root remains a real directory;
-- selected project remains a real directory and is not a symbolic link;
-- every existing parent component remains a real directory and not a symbolic link;
-- resolved target remains beneath the exact project;
-- target remains absent.
-
-If the revalidated target differs from the initially resolved target, or the parent chain no longer satisfies policy, the operation fails closed without calling `mkdir`.
-
-No lock or journal is added. The check-to-mutation window is minimized and the mutation primitive supplies target exclusivity.
-
-## 8. Post-create verification
-
-A successful `mkdir` syscall is necessary but not sufficient for MCP success.
-
-After creation, the provider must verify the final state using `lstat`-style no-follow inspection and project containment checks:
-
-- target exists;
-- target is a directory;
-- target is not a symbolic link;
-- parent chain is still valid and contained;
-- logical target path resolves to the just-created directory under the selected project.
-
-If verification cannot prove the final state, return `VERIFY_FAILED` and do not report success.
-
-Phase 4 does **not** introduce destructive rollback. If an external concurrent mutation changes the newly created path before it can be verified, the provider must fail visibly rather than deleting an entry whose ownership/state can no longer be proven. This is consistent with the project's safety rule that uncertainty must not trigger destructive cleanup.
-
-## 9. Stable error model
-
-Phase 4 adds no new public write-domain error code.
-
-The existing set remains:
-
-- `FILE_EXISTS`
-- `FILE_NOT_FOUND`
-- `STALE_FILE`
-- `INVALID_INPUT`
-- `POLICY_DENIED`
-- `WRITE_FAILED`
-- `VERIFY_FAILED`
 
 Expected meanings for `create_project_directory`:
 
-| Code | Meaning |
+| Condition | Public code |
 | --- | --- |
-| `FILE_EXISTS` | Final target already exists as a non-symlink filesystem entry or wins a concurrent create race. |
-| `FILE_NOT_FOUND` | Project or required parent directory is missing/not the required directory type. |
-| `INVALID_INPUT` | Project/path request shape or directory path syntax is invalid. |
-| `POLICY_DENIED` | Hidden/traversal/escape/symlink or another explicit path-policy denial. |
-| `WRITE_FAILED` | Non-policy filesystem failure prevents `mkdir`. |
-| `VERIFY_FAILED` | Final created state cannot be proven to satisfy the success invariants. |
+| empty/absolute/backslash/traversal/hidden/control/spoofing logical path | `INVALID_INPUT` |
+| unknown project | `FILE_NOT_FOUND` |
+| missing parent directory | `FILE_NOT_FOUND` |
+| parent is a regular file | `FILE_NOT_FOUND` |
+| existing final directory | `FILE_EXISTS` |
+| existing final regular file | `FILE_EXISTS` |
+| symlinked project/parent/final target | `POLICY_DENIED` |
+| target becomes existing at `mkdir` time | `FILE_EXISTS` |
+| other mutation I/O failure | `WRITE_FAILED` |
+| post-create state cannot be proven safe | `VERIFY_FAILED` |
 
-`STALE_FILE` remains part of the shared write-domain type for existing document operations but is not a normal directory-create outcome because there is no caller-supplied content version guard.
+Messages remain stable and bounded. They must not expose unrestricted absolute host paths in normal structured write errors.
 
-Public errors must not expose absolute host paths, secrets, launchd details, or raw internal exceptions.
+## 12. Filesystem primitive
 
-## 10. Component boundaries
-
-Phase 4 extends the existing architecture without restructuring it:
-
-```text
-tools.ts
-  -> ProjectService
-  -> vaultFs
-  -> pathPolicy
-  -> node:fs/promises mkdir + lstat
-```
-
-### `pathPolicy.ts`
-
-Add only the minimum directory-path parsing/resolution needed to validate an absent leaf under an existing real parent chain. Shared display-safety/containment helpers should be reused or factored narrowly where that improves clarity.
-
-Do not add a generic arbitrary-filesystem path resolver.
-
-### `vaultFs.ts`
-
-Add one directory-create primitive responsible for:
-
-- initial target resolution;
-- mutation-time revalidation;
-- non-recursive `mkdir`;
-- stable error translation;
-- post-create verification.
-
-Recommended domain result:
+The filesystem layer adds a narrow primitive, conceptually:
 
 ```ts
-interface DirectoryWrite {
+export interface DirectoryWrite {
   path: string;
 }
+
+export async function createDirectory(
+  projectRootPath: string,
+  project: string,
+  path: string,
+): Promise<DirectoryWrite>
 ```
 
-### `projectService.ts`
+Responsibilities:
 
-Add one method equivalent to:
+- call the directory-specific path resolver;
+- perform mutation-time revalidation;
+- call ordinary non-recursive `mkdir(target)` exactly once;
+- translate OS/path errors into the existing write-domain model;
+- post-verify the safe final state;
+- return only the logical directory path.
+
+It must not accept a mode, recursive flag, permissions policy, overwrite setting, alternate root, or callback supplied through MCP.
+
+A narrow internal dependency seam may be used in tests to deterministically simulate mutation races and verification failure. That seam is not part of the public MCP contract.
+
+## 13. ProjectService integration
+
+`ProjectService` gains one thin route:
 
 ```ts
 createProjectDirectory(project: string, path: string): Promise<DirectoryWrite>
 ```
 
-It should remain a thin domain-routing layer.
+It delegates to the filesystem primitive under the configured project root.
 
-### `tools.ts`
+No search, read, create-document, update-document, or move-document semantics change.
 
-Add the eighth tool with exact input schema and `SAFE_WRITE` annotations. Existing seven definitions and handlers remain unchanged.
+## 14. MCP tool integration
 
-## 11. Public schema details
-
-The eighth tool definition must use:
+`src/tools.ts` adds exactly one tool:
 
 ```text
 name = create_project_directory
 required = [project, path]
 additionalProperties = false
+annotations = SAFE_WRITE
 ```
 
-Descriptions must reinforce:
+The description must explicitly communicate:
 
-- `project` means `list_projects.directory`, not `list_projects.id`;
-- `path` is a project-relative directory path;
-- all parent directories must already exist;
-- the operation is non-recursive and never overwrites an existing target.
+- one directory is created;
+- operation is non-recursive;
+- parents must already exist;
+- existing target is not overwritten.
 
-No optional field is approved in Phase 4.
+No existing input schema gains `createParents`, `recursive`, or any similar option.
 
-## 12. Interaction with existing capabilities
+## 15. Composition with existing capabilities
 
-Phase 4's value is compositional. After a successful directory create, existing Phase 2/3 operations should work without semantic changes.
+Phase 4 is useful through composition rather than by expanding the new tool.
 
-Example flow:
+Example:
 
 ```text
 create_project_directory("Research")
   -> create_project_document("Research/notes.md")
-  -> move_project_document("draft.md", "Research/draft.md", expectedSha256)
 ```
 
-`get_project_structure` already returns directory entries, so a new `list_directories` capability is unnecessary.
+and:
 
-`create_project_document` and `move_project_document` must **not** gain implicit parent creation. Their existing-parent contract remains unchanged.
+```text
+create_project_directory("Archive")
+  -> read_project_document("PRD.md")
+  -> move_project_document(
+       sourcePath="PRD.md",
+       targetPath="Archive/PRD.md",
+       expectedSha256=<read SHA>
+     )
+```
 
-## 13. TDD and acceptance matrix
+This preserves the existing architecture: each tool stays small, while useful workflows emerge from composition.
 
-Implementation must cover at least the following cases before the public capability is considered complete:
+Phase 4 does not add a compound "create directory and move" transaction.
 
-1. create a root-level absent directory successfully;
-2. create one absent nested leaf beneath an existing real parent successfully;
-3. success result contains only the public logical `path`;
-4. existing real directory returns `FILE_EXISTS` and remains unchanged;
-5. existing regular file at target returns `FILE_EXISTS` and remains unchanged;
-6. missing immediate parent returns `FILE_NOT_FOUND` and creates no partial directory;
-7. missing earlier parent in a multi-component path returns `FILE_NOT_FOUND` and creates no partial directory;
-8. project symlink is denied;
-9. parent symlink is denied;
-10. target symlink is denied;
-11. absolute path is rejected;
-12. `.` / `..` traversal is rejected;
-13. hidden path component is rejected;
-14. empty component / repeated separator is rejected;
-15. backslash path syntax is rejected;
-16. unsafe control/spoofing characters are rejected;
-17. concurrent creates cannot both report success; one wins and the other fails without replacement;
-18. mutation-time parent change/symlink substitution fails closed;
-19. post-create verification failure does not report success;
-20. `get_project_structure` sees the newly created directory;
-21. `create_project_document` can create Markdown inside the new directory;
-22. `move_project_document` can move an existing Markdown document into the new directory while preserving its Phase 3 SHA/byte invariants;
-23. all seven existing tool schemas/annotations/behavior remain regression-green;
-24. final manifest contains exactly eight tools;
-25. the first four remain read-only and create/update/move/directory-create remain safe writes.
+## 16. Scope exclusions
 
-## 14. Load-bearing safety proofs
+Phase 4 explicitly does not add:
 
-Phase 4 needs two small causal proofs, not a broader proof framework.
+- recursive mkdir / `mkdir -p`;
+- directory deletion;
+- directory move or rename;
+- file deletion;
+- recursive directory copy;
+- cross-project mutation;
+- overwrite/force/replace flags;
+- permission/mode inputs;
+- batch operations;
+- Obsidian wikilink rewrite;
+- Obsidian CLI;
+- Obsidian command/plugin execution;
+- a new native helper;
+- a lock service, journal, database, cache, or background worker.
 
-### 14.1 Recursive-parent prohibition proof
+These are future capabilities only if separately justified and designed.
 
-Temporarily alter the implementation to use recursive directory creation (or otherwise auto-create missing parents). The missing-parent/no-partial-state test must become RED. Restore the approved non-recursive behavior afterward.
+## 17. TDD matrix
 
-### 14.2 Symlink-parent protection proof
+Implementation follows RED -> GREEN -> refactor, with regressions kept green after every slice.
 
-Temporarily bypass the parent symlink rejection at the relevant path-policy boundary. The parent-symlink denial test must become RED. Restore the approved no-symlink behavior afterward.
+### Path policy
 
-A separate target-overwrite mutation proof is unnecessary because `mkdir` cannot replace an existing target by design and ordinary concurrent-target regression coverage directly exercises `EEXIST` behavior.
+1. creates a root-level directory target under a valid project;
+2. creates a nested leaf under an existing real parent;
+3. rejects missing parent;
+4. rejects existing directory target;
+5. rejects existing regular-file target;
+6. rejects target symlink;
+7. rejects parent symlink;
+8. rejects project symlink;
+9. rejects `..` traversal;
+10. rejects absolute path;
+11. rejects backslash path;
+12. rejects hidden component;
+13. rejects empty and repeated-slash segments;
+14. rejects control/spoofing characters;
+15. accepts a directory name ending in `.md` because this is not a document resolver.
 
-## 15. Real S5 acceptance
+### Mutation primitive
 
-Use a disposable directory and Markdown documents inside an already-existing project, preferably `P033-GrandeGPT`, selected by its `list_projects.directory` value.
+16. successful creation returns only logical `path`;
+17. created object is a real directory;
+18. `mkdir` is non-recursive;
+19. missing-parent failure creates no partial parent;
+20. concurrent create produces one winner and one `FILE_EXISTS` loser;
+21. mutation-time parent change fails before `mkdir`;
+22. mutation-time target appearance becomes `FILE_EXISTS`;
+23. post-create verification failure returns `VERIFY_FAILED`;
+24. verification failure performs no delete/rollback;
+25. successful post-verification proves the exact intended target.
 
-### 15.1 Success composition probe
+### Service / MCP / regression
+
+26. `ProjectService.createProjectDirectory` routes through the configured root;
+27. tool manifest is exactly eight tools;
+28. new tool schema is exactly `{ project, path }` and rejects extra fields;
+29. new tool annotations are exact safe-write annotations;
+30. all previous seven tool schemas/annotations remain unchanged;
+31. runtime MCP path can create a directory and then create a Markdown document inside it;
+32. runtime MCP path can create a directory and then guarded-move a Markdown document into it;
+33. created directory appears in `get_project_structure`;
+34. Phase 1 read/search/structure regressions remain green;
+35. Phase 2 create/update regressions remain green;
+36. Phase 3 move/rename/native-helper regressions remain green.
+
+## 18. Load-bearing proofs
+
+Before merge, run two deliberate negative proofs and then restore the safe implementation.
+
+### Proof A: no recursive parent creation
+
+Temporarily replace the production single-leaf create behavior with recursive creation or otherwise bypass the missing-parent guard:
+
+```ts
+await mkdir(initialTarget, { recursive: true });
+```
+
+Required result: the missing-parent/no-partial test must turn RED because the forbidden parent chain gets created or the call incorrectly succeeds.
+
+Restore the approved implementation and require GREEN.
+
+### Proof B: parent symlink rejection
+
+Temporarily weaken the parent-component no-follow check so a symlinked parent is followed.
+
+Required result: the parent-symlink test must turn RED because the operation can resolve into the symlink target instead of returning `POLICY_DENIED`.
+
+Restore the approved implementation and require GREEN.
+
+A proof that stays green after the guard is removed is not load-bearing and must be fixed before release.
+
+## 19. Release gate
+
+Phase 4 implementation may merge only when all are true:
+
+1. exact eight-tool manifest test passes;
+2. existing seven contract tests pass unchanged;
+3. directory path-policy matrix passes;
+4. non-recursive/no-partial tests pass;
+5. no-overwrite/concurrent-create tests pass;
+6. symlink/containment tests pass;
+7. mutation-time revalidation tests pass;
+8. post-create verification tests pass;
+9. runtime composition tests pass;
+10. all Phase 1-3 regressions pass;
+11. fresh full unit profile passes;
+12. fresh typecheck passes;
+13. both load-bearing proofs demonstrably go RED when their guards are removed and GREEN after restoration;
+14. final diff contains no generated native binary and no unrelated refactor;
+15. live S5 acceptance passes after canonical activation.
+
+## 20. Real S5 acceptance
+
+Use a disposable path under a real configured project, with the project selected by exact `list_projects.directory`.
+
+### S5-A: success and composition
 
 1. Invoke `create_project_directory` for `phase4-s5-acceptance-20260824`.
 2. Require success result `{ path: "phase4-s5-acceptance-20260824" }`.
-3. Invoke `get_project_structure` and prove the directory is visible as `kind=directory`.
-4. Invoke `create_project_document` for `phase4-s5-acceptance-20260824/created.md` with known content.
-5. Read it and record exact SHA/content/byte count.
-6. Create a separate root-level `phase4-s5-move-source.md` with known content.
-7. Read source and record SHA/content/byte count.
-8. Move it to `phase4-s5-acceptance-20260824/moved.md` using the recorded SHA.
-9. Read the moved target and prove Phase 3 SHA/content/byte preservation.
-10. Prove the source path is absent.
+3. Create a Markdown document inside the directory with `create_project_document`; re-read it and require exact SHA/content/bytes.
+4. Create or choose a disposable Markdown source outside the directory; read its SHA.
+5. Move it into the new directory with `move_project_document` and the expected SHA.
+6. Re-read the moved target and prove SHA/content/bytes preservation.
+7. Require the original source path to be absent.
+8. Require `get_project_structure` to expose the new directory and both Markdown files.
 
-### 15.2 Missing-parent preservation probe
+### S5-B: missing parent / no partial creation
 
 1. Choose a unique path such as `phase4-s5-missing-parent-20260824/child` where the first component is absent.
 2. Invoke `create_project_directory`.
 3. Require `FILE_NOT_FOUND`.
-4. Prove neither the missing parent nor child appears in `get_project_structure`.
+4. Re-read structure and prove neither parent nor child exists.
 
-### 15.3 Existing-target preservation probe
+### S5-C: existing target preservation
 
-1. Choose one existing directory created by the success probe.
-2. Invoke `create_project_directory` for the exact same path again.
+1. Reuse the successful directory from S5-A, now containing both Markdown files.
+2. Invoke `create_project_directory` for the same directory again.
 3. Require `FILE_EXISTS`.
-4. Prove the directory and its created/moved Markdown contents remain unchanged.
+4. Re-read both contained Markdown files.
+5. Prove their content, SHA, and byte lengths are unchanged.
 
-Acceptance artifacts may remain because the public provider still has no delete capability. Phase 4 must not add delete merely for cleanup convenience.
+Because the V1/V2 public surface intentionally has no delete capability, acceptance artifacts may remain in the project. Do not add a delete tool merely for test cleanup.
 
-## 16. Release gate
+## 21. Phase closeout
 
-Phase 4 is release-ready only when all of the following are fresh and true:
+Phase 4 closes only after the real S5 matrix is complete and the exact live eight-tool contract has been re-checked after acceptance.
 
-- approved Phase 4 spec and implementation plan are committed;
-- unit suite passes;
-- typecheck passes;
-- path-policy directory cases are green;
-- directory mutation and verification tests are green;
-- both Phase 4 load-bearing proofs have been demonstrated and restored;
-- Phase 1 read regression remains green;
-- Phase 2 create/update regression remains green;
-- Phase 3 move/rename regression remains green;
-- MCP manifest contains exactly eight tools;
-- the eighth capability contract exactly matches this spec;
-- existing seven public contracts are unchanged;
-- no recursive mkdir/delete/directory move/cross-project mutation/link rewrite/Obsidian CLI capability is exposed;
-- PR is opened and merged through normal GrandeGPT flow;
-- canonical launchd provider is restarted/reloaded if required to activate the new public tool contract;
-- live GrandeGPT capability discovery reports exactly eight Obsidian tools with correct risk/annotations;
-- complete real S5 success, missing-parent, and existing-target probes pass on the actual configured Obsidian filesystem;
-- Phase 4 closeout evidence is recorded after live acceptance.
+The closeout record must capture:
 
-## 17. Explicit non-goals
+- implementation PR and merge SHA;
+- canonical activation evidence;
+- exact live tool count and annotations;
+- S5 success SHA/content/byte preservation evidence;
+- missing-parent/no-partial evidence;
+- existing-target preservation evidence;
+- fresh unit/typecheck counts;
+- both load-bearing proof results;
+- explicit `Phase 4 / Safe Directory Core: PASSED / CLOSED` decision.
 
-Phase 4 must not add or prebuild:
+Acceptance artifacts remain only because deletion is intentionally outside the public contract; this must not be treated as a reason to expand scope.
 
-- recursive `mkdir` / `mkdir -p` behavior;
-- automatic parent creation in document create or move;
-- directory delete;
-- file delete;
-- directory move or rename;
-- cross-project directory creation/mutation;
-- overwrite/force/replace behavior;
-- arbitrary filesystem mode/permission controls;
-- batch/glob directory creation;
-- copy/delete fallback;
-- append/patch/frontmatter patch;
-- wikilink rewriting or backlink maintenance;
-- Obsidian CLI;
-- Obsidian plugin API;
-- generic filesystem CLI;
-- additional native executable;
-- locks, journal, database, index, or cache;
-- background reconciliation worker;
-- provider awareness of GrandeGPT task internals.
+## 22. Implementation completion evidence
 
-## 18. Stop conditions
+Implementation followed the approved plan in `docs/superpowers/plans/2026-08-24-grande-obsidian-mcp-phase4-safe-directory-core.md`.
 
-Implementation must stop and report to the Human Owner if any of the following occurs:
+- Implementation task: `task-gomcp-phase4-impl-20260824-001`
+- Implementation PR: #8
+- Implementation head: `34bce7087af0c12b843838082d8e4a3e1eded6ce`
+- Canonical merge SHA: `ab22c394131d6dae3e021d6c24813d7d2dd7c36d`
+- Fresh pre-merge unit: 15 test files / 130 tests passed
+- Fresh pre-merge typecheck: passed
+- Load-bearing Proof A: bypassing existing-parent-only semantics made missing-parent/no-partial tests RED; restored implementation returned GREEN.
+- Load-bearing Proof B: following a symlinked directory parent made the parent-symlink policy test RED; restored implementation returned GREEN.
 
-1. correct directory creation cannot preserve the existing no-symlink/project-containment boundary with Node/macOS filesystem primitives;
-2. correctness requires recursive parent creation, destructive cleanup, a new native helper, or broader filesystem mutation;
-3. the approved public contract conflicts with actual platform behavior in a way that changes semantics;
-4. a reliable success/failure model requires a new destructive capability or a new routine Human Gate;
-5. post-create uncertainty cannot be surfaced safely without deleting or replacing ambiguous external state.
-
-Ordinary implementation details, focused refactoring, test failures, and type errors within the approved boundary are not Human Gate conditions.
-
-## 19. Completion definition
-
-Phase 4 is complete when the provider exposes exactly eight public capabilities and `create_project_directory` can safely create one absent project-relative directory leaf beneath an already-existing real parent chain, without recursive parent creation, overwrite, symlink traversal, project escape, destructive rollback, or changes to existing document semantics; and the real S5 acceptance demonstrates directory creation composing successfully with existing create/read/move capabilities on the canonical launchd provider.
+Live acceptance and final closeout evidence are recorded separately in `docs/superpowers/closeouts/2026-08-24-grande-obsidian-mcp-phase4-closeout.md`.
