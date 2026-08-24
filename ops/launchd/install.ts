@@ -14,10 +14,15 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   LAUNCHD_LABEL,
+  LAUNCHD_PORT,
   renderLaunchAgentPlist,
   resolveCanonicalRepoRoot,
 } from "../../src/launchd.ts";
 import { buildRenameExcl } from "../native/buildRenameExcl.ts";
+
+const LAUNCHD_TRANSITION_TIMEOUT_MS = 5_000;
+const READINESS_TIMEOUT_MS = 15_000;
+const POLL_INTERVAL_MS = 100;
 
 function fail(message: string): never {
   throw new Error(`[launchd:install] ${message}`);
@@ -30,6 +35,49 @@ function run(command: string, args: string[], allowFailure = false) {
     fail(`${command} ${args.join(" ")} failed: ${detail}`);
   }
   return result;
+}
+
+function sleepSync(milliseconds: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
+function waitUntilUnloaded(serviceTarget: string): void {
+  const deadline = Date.now() + LAUNCHD_TRANSITION_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (run("/bin/launchctl", ["print", serviceTarget], true).status !== 0) return;
+    sleepSync(POLL_INTERVAL_MS);
+  }
+  fail(`timed out waiting for ${serviceTarget} to finish bootout`);
+}
+
+function waitUntilReady(serviceTarget: string): void {
+  const deadline = Date.now() + READINESS_TIMEOUT_MS;
+  const endpoint = `http://127.0.0.1:${LAUNCHD_PORT}/mcp`;
+
+  while (Date.now() < deadline) {
+    const loaded = run("/bin/launchctl", ["print", serviceTarget], true).status === 0;
+    if (loaded) {
+      const probe = run(
+        "/usr/bin/curl",
+        [
+          "--silent",
+          "--show-error",
+          "--max-time",
+          "1",
+          "--output",
+          "/dev/null",
+          "--write-out",
+          "%{http_code}",
+          endpoint,
+        ],
+        true,
+      );
+      if (probe.status === 0 && probe.stdout.trim() === "401") return;
+    }
+    sleepSync(POLL_INTERVAL_MS);
+  }
+
+  fail(`timed out waiting for ${serviceTarget} readiness at ${endpoint}`);
 }
 
 const scriptRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -102,11 +150,16 @@ try {
   const loaded = run("/bin/launchctl", ["print", serviceTarget], true).status === 0;
   if (loaded) {
     run("/bin/launchctl", ["bootout", serviceTarget]);
+    waitUntilUnloaded(serviceTarget);
   }
 
   renameSync(tempPlistPath, plistPath);
   run("/bin/launchctl", ["bootstrap", domain, plistPath]);
-  run("/bin/launchctl", ["kickstart", "-k", serviceTarget]);
+
+  // RunAtLoad + KeepAlive starts the service as part of bootstrap. A follow-up kickstart -k
+  // can kill that first process while the endpoint is becoming ready, so wait for the
+  // launchd service and its unauthenticated 401 contract instead of forcing a second start.
+  waitUntilReady(serviceTarget);
   run("/bin/launchctl", ["print", serviceTarget]);
 
   console.log(`[launchd:install] installed ${LAUNCHD_LABEL}`);
