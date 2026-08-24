@@ -325,9 +325,6 @@ export async function moveMarkdown(
     throw new WriteDomainError("STALE_FILE", "document has changed since it was read");
   }
 
-  // Resolve the test-only dependency after the initial guarded snapshot. A getter may be used
-  // by deterministic race tests to inject a mutation at exactly the point that the mandatory
-  // mutation-time revalidation must catch. Production dependencies are plain objects.
   const renameExclusive = dependencies?.exclusiveRename ?? exclusiveRename;
 
   try {
@@ -364,8 +361,6 @@ export async function moveMarkdown(
     };
   }
 
-  // Reverse recovery is safe only while the target is still the exact moved filesystem identity
-  // and the original source path is absent. Never move a different/competing target back.
   if (finalTarget === null || !sameIdentity(finalTarget, guarded) || !sourceAbsent) {
     throw new WriteDomainError("VERIFY_FAILED", "move result could not be safely verified or restored");
   }
